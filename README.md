@@ -2,6 +2,8 @@
 
 A PyTorch-based supervised learning project for detecting network anomalies in embedded systems.
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ajipalar/network_anomaly_detection/blob/main/colab_train.ipynb)
+
 ## Features
 
 - **PyTorch Implementation**: Modern deep learning framework
@@ -9,7 +11,7 @@ A PyTorch-based supervised learning project for detecting network anomalies in e
 - **Model Checkpointing**: Save and resume training
 - **Data Augmentation**: Gaussian noise augmentation with class resampling
 - **Hugging Face Integration**: Upload models to Hugging Face Hub
-- **Google Colab Support**: Ready-to-use Colab notebook
+- **Google Colab Support**: Ready-to-use Colab notebook - [Open in Colab](https://colab.research.google.com/github/ajipalar/network_anomaly_detection/blob/main/colab_train.ipynb)
 - **Comprehensive Testing**: Evaluation scripts with metrics
 
 ## Project Structure
@@ -67,7 +69,9 @@ pip install -r requirements.txt
 ## Configuration
 
 Edit `config.yaml` to customize:
-- Model architecture (hidden layers, dropout, etc.)
+- **Model type**: Choose `"pytorch"` or `"xgboost"` (default: `"pytorch"`)
+- Model architecture (hidden layers, dropout, etc. for PyTorch)
+- XGBoost hyperparameters (n_estimators, max_depth, learning_rate, etc.)
 - Training hyperparameters (learning rate, batch size, epochs)
 - Cross validation settings (number of folds)
 - Checkpoint settings
@@ -142,6 +146,18 @@ This creates:
 - Comprehensive metrics table
 - All visualizations logged to wandb
 
+## Quick Start with Google Colab
+
+The easiest way to get started is using the provided Google Colab notebook:
+
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ajipalar/network_anomaly_detection/blob/main/colab_train.ipynb)
+
+The notebook includes:
+- Complete pipeline from data augmentation to model testing
+- Support for both PyTorch and XGBoost models
+- Automatic model comparison and results visualization
+- TensorBoard integration
+
 ## Usage
 
 ### Training
@@ -151,7 +167,13 @@ This creates:
 python train.py --config config.yaml
 ```
 
-**K-fold cross validation:**
+**Train XGBoost model:**
+Set `model.type: "xgboost"` in `config.yaml`, then:
+```bash
+python train.py --config config.yaml
+```
+
+**K-fold cross validation (PyTorch only):**
 ```bash
 python train.py --config config.yaml --use-cv
 ```
@@ -176,7 +198,11 @@ python train.py --config config.yaml --resume checkpoints/checkpoint_epoch_50.pt
 
 **Test a specific checkpoint:**
 ```bash
+# PyTorch model
 python test.py --config config.yaml --checkpoint checkpoints/best_model.pt
+
+# XGBoost model
+python test.py --config config.yaml --checkpoint checkpoints/best_xgboost_model.pkl
 ```
 
 **Test the final model:**
@@ -184,7 +210,22 @@ python test.py --config config.yaml --checkpoint checkpoints/best_model.pt
 python test.py --config config.yaml --final-model
 ```
 
+The script automatically detects model type from file extension (.pt for PyTorch, .pkl for XGBoost).
+
 This will automatically use `checkpoints/final_model/best_model.pt`.
+
+**Test with custom model name:**
+```bash
+python test.py --config config.yaml --checkpoint checkpoints/fold_1/best_model.pt --model-name "my_custom_model"
+```
+
+**Test results are automatically saved to `test_results.csv`** with columns:
+- `timestamp`: When the test was run
+- `model_name`: Name of the model (auto-detected from fold number or "final_model" by default)
+- `checkpoint_path`: Path to the checkpoint file
+- `accuracy`, `precision`, `recall`, `f1_score`, `auc`: Evaluation metrics
+
+All test results are appended to the same CSV file for easy comparison.
 
 ### Model Assessment
 
