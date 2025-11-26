@@ -45,6 +45,7 @@ runs/
 
 # Data (keep structure, ignore large files)
 data/processed/
+data/augmented/
 *.csv.bak
 
 # OS

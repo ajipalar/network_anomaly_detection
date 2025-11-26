@@ -5,6 +5,7 @@ Testing script for evaluating trained models.
 import argparse
 import torch
 import numpy as np
+import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -169,14 +170,62 @@ def main():
     )
     print(f"Using device: {device}")
     
-    # Load data
-    data_path = args.test_data or config['data']['data_path']
-    print(f"Loading test data from {data_path}...")
-    X, y = load_data(data_path)
+    # Load test data (use original test data, not augmented)
+    data_config = config['data']
+    use_augmented = data_config.get('use_augmented_data', False)
     
-    # Preprocess data (use scaler from training if available)
-    # For now, we'll fit a new scaler (in production, load from training)
-    X_processed, y_processed, _ = preprocess_data(X, y, fit_scaler=True)
+    if use_augmented:
+        # Try to load test data from augmented directory
+        aug_dir = data_config.get('augmented_data_dir', 'data/augmented')
+        test_path = args.test_data or data_config.get('test_data_path') or os.path.join(aug_dir, 'test_data.csv')
+        
+        if os.path.exists(test_path):
+            print(f"Loading test data from augmented directory: {test_path}")
+            X_test, y_test = load_data(test_path)
+            print(f"Loaded {len(X_test)} test samples")
+            
+            # Load scaler from checkpoint if available, otherwise fit new one
+            # For testing, we should use the same scaler as training
+            # Try to load from checkpoint or use training data to fit scaler
+            print("Loading scaler from training data...")
+            train_path = data_config.get('train_data_path') or os.path.join(aug_dir, 'train_data_augmented.csv')
+            if os.path.exists(train_path):
+                X_train, _ = load_data(train_path)
+                _, _, scaler = preprocess_data(X_train, pd.Series([0] * len(X_train)), fit_scaler=True, scaler=None)
+            else:
+                # Fallback: fit scaler on test data (not ideal but works)
+                print("Warning: Could not find training data to fit scaler, fitting on test data")
+                scaler = None
+        else:
+            print(f"Warning: Test data not found at {test_path}, using original data")
+            use_augmented = False
+    
+    if not use_augmented:
+        # Original data loading
+        data_path = args.test_data or data_config['data_path']
+        print(f"Loading data from {data_path}...")
+        X_test, y_test = load_data(data_path)
+        print(f"Loaded {len(X_test)} samples with {X_test.shape[1]} features")
+        
+        # For testing with original data, we need to split to get test set
+        from sklearn.model_selection import train_test_split
+        X_temp, X_test, y_temp, y_test = train_test_split(
+            X_test, y_test,
+            test_size=data_config['test_size'],
+            random_state=data_config['random_state'],
+            stratify=y_test
+        )
+        
+        # Fit scaler on training portion (we'll only use test portion)
+        _, _, scaler = preprocess_data(X_temp, y_temp, fit_scaler=True, scaler=None)
+    
+    # Preprocess test data with the scaler
+    print("Preprocessing test data...")
+    X_processed, y_processed, _ = preprocess_data(
+        X_test, y_test,
+        fit_scaler=False,
+        scaler=scaler
+    )
     
     # Create test dataset
     test_dataset = NetworkAnomalyDataset(X_processed, y_processed)

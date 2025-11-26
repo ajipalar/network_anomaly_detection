@@ -7,6 +7,7 @@ A PyTorch-based supervised learning project for detecting network anomalies in e
 - **PyTorch Implementation**: Modern deep learning framework
 - **K-fold Cross Validation**: Robust model evaluation
 - **Model Checkpointing**: Save and resume training
+- **Data Augmentation**: Gaussian noise augmentation with class resampling
 - **Hugging Face Integration**: Upload models to Hugging Face Hub
 - **Google Colab Support**: Ready-to-use Colab notebook
 - **Comprehensive Testing**: Evaluation scripts with metrics
@@ -70,6 +71,30 @@ Edit `config.yaml` to customize:
 - Cross validation settings (number of folds)
 - Checkpoint settings
 - Hugging Face repository details
+- Data augmentation settings
+
+## Data Augmentation
+
+The project includes a data augmentation pipeline that:
+- Adds Gaussian noise to numerical features
+- Resamples positive class to achieve ~30% ratio
+- Holds out test data before augmentation
+- Uses augmented data for training/validation, original test data for evaluation
+
+### Running Augmentation
+
+```bash
+python augment_data.py --noise-scale 0.1 --target-positive-ratio 0.3
+```
+
+This will create:
+- `data/augmented/train_data_augmented.csv` - Augmented training data
+- `data/augmented/val_data.csv` - Validation data
+- `data/augmented/test_data.csv` - Original test data (held out)
+
+### Using Augmented Data
+
+Set `use_augmented_data: true` in `config.yaml` to automatically use augmented data for training. The test script will automatically use the original test data for evaluation.
 
 ## Weights & Biases Integration
 

@@ -38,6 +38,12 @@ data:
   val_size: 0.1
   random_state: 42
   normalize: true
+  # Augmentation settings
+  use_augmented_data: true  # Use augmented data for training/validation
+  augmented_data_dir: "data/augmented"
+  train_data_path: null  # Auto-detect: data/augmented/train_data_augmented.csv
+  val_data_path: null    # Auto-detect: data/augmented/val_data.csv
+  test_data_path: null   # Auto-detect: data/augmented/test_data.csv
 
 # Checkpoint Configuration
 checkpoint:

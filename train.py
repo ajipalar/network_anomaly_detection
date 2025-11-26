@@ -115,51 +115,104 @@ def main():
     print(f"Using device: {device}")
     
     # Load data
-    print("Loading data...")
-    X, y = load_data(config['data']['data_path'])
-    print(f"Loaded {len(X)} samples with {X.shape[1]} features")
+    data_config = config['data']
+    use_augmented = data_config.get('use_augmented_data', False)
     
-    # Preprocess data
-    print("Preprocessing data...")
-    X_processed, y_processed, scaler = preprocess_data(
-        X, y,
-        fit_scaler=True,
-        scaler=None
-    )
+    if use_augmented:
+        # Load augmented data
+        import os
+        aug_dir = data_config.get('augmented_data_dir', 'data/augmented')
+        train_path = data_config.get('train_data_path') or os.path.join(aug_dir, 'train_data_augmented.csv')
+        val_path = data_config.get('val_data_path') or os.path.join(aug_dir, 'val_data.csv')
+        
+        if os.path.exists(train_path) and os.path.exists(val_path):
+            print("Loading augmented data...")
+            X_train, y_train = load_data(train_path)
+            X_val, y_val = load_data(val_path)
+            print(f"Loaded augmented training data: {len(X_train)} samples")
+            print(f"Loaded validation data: {len(X_val)} samples")
+            
+            # Preprocess training data (fit scaler)
+            print("Preprocessing training data...")
+            X_train_processed, y_train_processed, scaler = preprocess_data(
+                X_train, y_train,
+                fit_scaler=True,
+                scaler=None
+            )
+            
+            # Preprocess validation data (use same scaler)
+            print("Preprocessing validation data...")
+            X_val_processed, y_val_processed, _ = preprocess_data(
+                X_val, y_val,
+                fit_scaler=False,
+                scaler=scaler
+            )
+            
+            if args.use_cv:
+                print("Warning: Cross-validation with augmented data not fully supported.")
+                print("Using augmented training data for CV...")
+                # For CV, we'll use the augmented training data
+                fold_results = perform_kfold_cv(
+                    X_train_processed,
+                    y_train_processed,
+                    config,
+                    device
+                )
+                print_cv_summary(fold_results)
+            else:
+                print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}")
+        else:
+            print(f"Warning: Augmented data not found at {train_path} or {val_path}")
+            print("Falling back to original data loading...")
+            use_augmented = False
     
-    if args.use_cv:
-        # K-fold cross validation
-        print("Starting K-fold cross validation...")
-        fold_results = perform_kfold_cv(
-            X_processed,
-            y_processed,
-            config,
-            device
-        )
-        print_cv_summary(fold_results)
-    else:
-        # Standard train/val/test split
-        print("Splitting data...")
-        X_train, X_temp, y_train, y_temp = train_test_split(
-            X_processed,
-            y_processed,
-            test_size=config['data']['test_size'],
-            random_state=config['data']['random_state']
+    if not use_augmented:
+        # Original data loading
+        print("Loading data...")
+        X, y = load_data(data_config['data_path'])
+        print(f"Loaded {len(X)} samples with {X.shape[1]} features")
+        
+        # Preprocess data
+        print("Preprocessing data...")
+        X_processed, y_processed, scaler = preprocess_data(
+            X, y,
+            fit_scaler=True,
+            scaler=None
         )
         
-        val_size = config['data']['val_size'] / (1 - config['data']['test_size'])
-        X_val, X_test, y_val, y_test = train_test_split(
-            X_temp,
-            y_temp,
-            test_size=1 - val_size,
-            random_state=config['data']['random_state']
-        )
-        
-        print(f"Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+        if args.use_cv:
+            # K-fold cross validation
+            print("Starting K-fold cross validation...")
+            fold_results = perform_kfold_cv(
+                X_processed,
+                y_processed,
+                config,
+                device
+            )
+            print_cv_summary(fold_results)
+        else:
+            # Standard train/val/test split
+            print("Splitting data...")
+            X_train_processed, X_temp, y_train_processed, y_temp = train_test_split(
+                X_processed,
+                y_processed,
+                test_size=data_config['test_size'],
+                random_state=data_config['random_state']
+            )
+            
+            val_size = data_config['val_size'] / (1 - data_config['test_size'])
+            X_val_processed, X_test, y_val_processed, y_test = train_test_split(
+                X_temp,
+                y_temp,
+                test_size=1 - val_size,
+                random_state=data_config['random_state']
+            )
+            
+            print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}, Test: {len(X_test)}")
         
         # Create datasets
-        train_dataset = NetworkAnomalyDataset(X_train, y_train)
-        val_dataset = NetworkAnomalyDataset(X_val, y_val)
+        train_dataset = NetworkAnomalyDataset(X_train_processed, y_train_processed)
+        val_dataset = NetworkAnomalyDataset(X_val_processed, y_val_processed)
         
         # Create data loaders
         train_loader = create_dataloader(
