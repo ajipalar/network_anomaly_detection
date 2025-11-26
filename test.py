@@ -215,54 +215,48 @@ def main():
     )
     print(f"Using device: {device}")
     
-    # Load test data (use original test data, not augmented)
+    # Load test data from processed directory
     data_config = config['data']
+    test_path = args.test_data or 'data/processed/test.csv'
+    
+    if not os.path.exists(test_path):
+        raise FileNotFoundError(
+            f"Test data not found at {test_path}. "
+            f"Please ensure train/test split has been created (run train.py first)."
+        )
+    
+    print(f"Loading test data from {test_path}...")
+    X_test, y_test = load_data(test_path)
+    print(f"Loaded {len(X_test)} test samples with {X_test.shape[1]} features")
+    
+    # Load training data to fit scaler (use same scaler as training)
+    print("Fitting scaler on training data...")
+    train_path = 'data/processed/train.csv'
     use_augmented = data_config.get('use_augmented_data', False)
     
     if use_augmented:
-        # Try to load test data from augmented directory
+        # Try to use augmented training data for scaler
         aug_dir = data_config.get('augmented_data_dir', 'data/augmented')
-        test_path = args.test_data or data_config.get('test_data_path') or os.path.join(aug_dir, 'test_data.csv')
-        
-        if os.path.exists(test_path):
-            print(f"Loading test data from augmented directory: {test_path}")
-            X_test, y_test = load_data(test_path)
-            print(f"Loaded {len(X_test)} test samples")
-            
-            # Load scaler from checkpoint if available, otherwise fit new one
-            # For testing, we should use the same scaler as training
-            # Try to load from checkpoint or use training data to fit scaler
-            print("Loading scaler from training data...")
-            train_path = data_config.get('train_data_path') or os.path.join(aug_dir, 'train_data_augmented.csv')
+        aug_train_path = data_config.get('train_data_path') or os.path.join(aug_dir, 'train_data_augmented.csv')
+        if os.path.exists(aug_train_path):
+            X_train, _ = load_data(aug_train_path)
+            _, _, scaler = preprocess_data(X_train, pd.Series([0] * len(X_train)), fit_scaler=True, scaler=None)
+        else:
+            # Fallback to processed train data
             if os.path.exists(train_path):
                 X_train, _ = load_data(train_path)
                 _, _, scaler = preprocess_data(X_train, pd.Series([0] * len(X_train)), fit_scaler=True, scaler=None)
             else:
-                # Fallback: fit scaler on test data (not ideal but works)
                 print("Warning: Could not find training data to fit scaler, fitting on test data")
                 scaler = None
+    else:
+        # Use processed training data for scaler
+        if os.path.exists(train_path):
+            X_train, _ = load_data(train_path)
+            _, _, scaler = preprocess_data(X_train, pd.Series([0] * len(X_train)), fit_scaler=True, scaler=None)
         else:
-            print(f"Warning: Test data not found at {test_path}, using original data")
-            use_augmented = False
-    
-    if not use_augmented:
-        # Original data loading
-        data_path = args.test_data or data_config['data_path']
-        print(f"Loading data from {data_path}...")
-        X_test, y_test = load_data(data_path)
-        print(f"Loaded {len(X_test)} samples with {X_test.shape[1]} features")
-        
-        # For testing with original data, we need to split to get test set
-        from sklearn.model_selection import train_test_split
-        X_temp, X_test, y_temp, y_test = train_test_split(
-            X_test, y_test,
-            test_size=data_config['test_size'],
-            random_state=data_config['random_state'],
-            stratify=y_test
-        )
-        
-        # Fit scaler on training portion (we'll only use test portion)
-        _, _, scaler = preprocess_data(X_temp, y_temp, fit_scaler=True, scaler=None)
+            print("Warning: Could not find training data to fit scaler, fitting on test data")
+            scaler = None
     
     # Preprocess test data with the scaler
     print("Preprocessing test data...")

@@ -3,11 +3,16 @@ Main training script.
 """
 
 import argparse
+import os
+from datetime import datetime
+from typing import Tuple, Optional, Dict, Any
+import numpy as np
+
 import torch
 from sklearn.model_selection import train_test_split
 
-from src.data import load_data, preprocess_data, NetworkAnomalyDataset, create_dataloader
-from src.models import create_model, create_xgboost_model
+from src.data import load_data, preprocess_data, NetworkAnomalyDataset, create_dataloader, create_train_test_split
+from src.models import create_model
 from src.training import Trainer, train_xgboost_model
 from src.utils import load_config, get_device
 from src.validation import perform_kfold_cv, print_cv_summary
@@ -21,6 +26,7 @@ except ImportError:
 
 # Track if TensorBoard has been patched (module-level flag)
 _tensorboard_patched = False
+
 
 def safe_patch_tensorboard(root_logdir: str):
     """
@@ -57,7 +63,471 @@ def safe_patch_tensorboard(root_logdir: str):
         print(f"Warning: Could not patch TensorBoard: {e}")
 
 
+def initialize_wandb(config: Dict[str, Any]) -> bool:
+    """
+    Initialize Weights & Biases if enabled in config.
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        True if wandb was initialized, False otherwise
+    """
+    wandb_config = config.get('logging', {})
+    use_wandb = wandb_config.get('use_wandb', False) and WANDB_AVAILABLE
+    
+    if not use_wandb:
+        return False
+    
+    project = wandb_config.get('wandb_project', 'network-anomaly-detection')
+    entity = wandb_config.get('wandb_entity', None)
+    run_name = wandb_config.get('wandb_run_name')
+    if run_name is None:
+        run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    
+    wandb.init(
+        project=project,
+        entity=entity,
+        name=run_name,
+        config=config,
+        job_type="training",
+        sync_tensorboard=True
+    )
+    
+    safe_patch_tensorboard(config['logging']['tensorboard_dir'])
+    print(f"Initialized W&B run: {run_name}")
+    print(f"TensorBoard logs will be synced to wandb")
+    
+    return True
+
+
+def load_augmented_data(data_config: Dict[str, Any]) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]]:
+    """
+    Load augmented training and validation data.
+    
+    Args:
+        data_config: Data configuration dictionary
+        
+    Returns:
+        Tuple of (X_train, y_train, X_val, y_val) if successful, None otherwise
+    """
+    aug_dir = data_config.get('augmented_data_dir', 'data/augmented')
+    train_path = data_config.get('train_data_path') or os.path.join(aug_dir, 'train_data_augmented.csv')
+    val_path = data_config.get('val_data_path') or os.path.join(aug_dir, 'val_data.csv')
+    
+    if not (os.path.exists(train_path) and os.path.exists(val_path)):
+        print(f"Warning: Augmented data not found at {train_path} or {val_path}")
+        return None
+    
+    print("Loading augmented data...")
+    X_train, y_train = load_data(train_path)
+    X_val, y_val = load_data(val_path)
+    print(f"Loaded augmented training data: {len(X_train)} samples")
+    print(f"Loaded validation data: {len(X_val)} samples")
+    
+    return X_train, y_train, X_val, y_val
+
+
+def preprocess_train_val_data(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, Any]:
+    """
+    Preprocess training and validation data with a shared scaler.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_val: Validation features
+        y_val: Validation labels
+        
+    Returns:
+        Tuple of (X_train_processed, y_train_processed, X_val_processed, y_val_processed, scaler)
+    """
+    print("Preprocessing training data...")
+    X_train_processed, y_train_processed, scaler = preprocess_data(
+        X_train, y_train,
+        fit_scaler=True,
+        scaler=None
+    )
+    
+    print("Preprocessing validation data...")
+    X_val_processed, y_val_processed, _ = preprocess_data(
+        X_val, y_val,
+        fit_scaler=False,
+        scaler=scaler
+    )
+    
+    return X_train_processed, y_train_processed, X_val_processed, y_val_processed, scaler
+
+
+def split_data_for_xgboost(
+    X: np.ndarray,
+    y: np.ndarray,
+    data_config: Dict[str, Any]
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Split training data into train and validation sets for XGBoost.
+    Note: Test set is already separated in data/processed/test.csv
+    
+    Args:
+        X: Features (from training data)
+        y: Labels (from training data)
+        data_config: Data configuration dictionary
+        
+    Returns:
+        Tuple of (X_train, X_val, y_train, y_val)
+    """
+    print("Splitting training data into train/validation...")
+    val_size = data_config['val_size']
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y,
+        test_size=val_size,
+        random_state=data_config['random_state'],
+        stratify=y
+    )
+    
+    print(f"Train: {len(X_train)}, Val: {len(X_val)}")
+    
+    return X_train, X_val, y_train, y_val
+
+
+def split_data_for_pytorch(
+    X: np.ndarray,
+    y: np.ndarray,
+    data_config: Dict[str, Any]
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Split training data into train and validation sets for PyTorch.
+    Note: Test set is already separated in data/processed/test.csv
+    
+    Args:
+        X: Features (from training data)
+        y: Labels (from training data)
+        data_config: Data configuration dictionary
+        
+    Returns:
+        Tuple of (X_train, X_val, y_train, y_val)
+    """
+    print("Splitting training data into train/validation...")
+    val_size = data_config['val_size']
+    X_train, X_val, y_train, y_val = train_test_split(
+        X, y,
+        test_size=val_size,
+        random_state=data_config['random_state'],
+        stratify=y
+    )
+    
+    print(f"Train: {len(X_train)}, Val: {len(X_val)}")
+    
+    return X_train, X_val, y_train, y_val
+
+
+def train_xgboost(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    config: Dict[str, Any],
+    use_cv: bool
+) -> None:
+    """
+    Train XGBoost model.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_val: Validation features
+        y_val: Validation labels
+        config: Configuration dictionary
+        use_cv: Whether cross-validation was requested (not yet supported for XGBoost)
+    """
+    if use_cv:
+        print("XGBoost K-fold cross validation not yet implemented. Using standard train/val split.")
+    
+    print(f"Train: {len(X_train)}, Val: {len(X_val)}")
+    
+    checkpoint_dir = config['checkpoint']['save_dir']
+    model, metrics = train_xgboost_model(
+        X_train,
+        y_train,
+        X_val,
+        y_val,
+        config,
+        checkpoint_dir
+    )
+    
+    print("XGBoost training completed!")
+
+
+def create_pytorch_trainer(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    config: Dict[str, Any],
+    device: torch.device
+) -> Trainer:
+    """
+    Create PyTorch trainer with model, data loaders, and configuration.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_val: Validation features
+        y_val: Validation labels
+        config: Configuration dictionary
+        device: Device to run training on
+        
+    Returns:
+        Configured Trainer instance
+    """
+    # Create datasets
+    train_dataset = NetworkAnomalyDataset(X_train, y_train)
+    val_dataset = NetworkAnomalyDataset(X_val, y_val)
+    
+    # Create data loaders
+    train_loader = create_dataloader(
+        train_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=True
+    )
+    val_loader = create_dataloader(
+        val_dataset,
+        batch_size=config['training']['batch_size'],
+        shuffle=False
+    )
+    
+    # Create model
+    model_config = config['model'].copy()
+    model_config['input_dim'] = X_train.shape[1]
+    model = create_model(model_config)
+    
+    # Create trainer
+    run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    trainer = Trainer(
+        model=model,
+        train_loader=train_loader,
+        val_loader=val_loader,
+        config=config['training'],
+        device=device,
+        checkpoint_dir=config['checkpoint']['save_dir'],
+        tensorboard_dir=config['logging']['tensorboard_dir'],
+        run_name=run_name
+    )
+    
+    return trainer
+
+
+def train_pytorch_standard(
+    X_train: np.ndarray,
+    y_train: np.ndarray,
+    X_val: np.ndarray,
+    y_val: np.ndarray,
+    config: Dict[str, Any],
+    device: torch.device,
+    resume_checkpoint: Optional[str] = None
+) -> None:
+    """
+    Train PyTorch model with standard train/val split.
+    
+    Args:
+        X_train: Training features
+        y_train: Training labels
+        X_val: Validation features
+        y_val: Validation labels
+        config: Configuration dictionary
+        device: Device to run training on
+        resume_checkpoint: Optional path to checkpoint to resume from
+    """
+    print(f"Train: {len(X_train)}, Val: {len(X_val)}")
+    
+    trainer = create_pytorch_trainer(X_train, y_train, X_val, y_val, config, device)
+    
+    if resume_checkpoint:
+        print(f"Resuming from checkpoint: {resume_checkpoint}")
+        trainer.load_checkpoint(resume_checkpoint)
+    
+    print("Starting training...")
+    trainer.train(config['training']['num_epochs'])
+    print("Training completed!")
+
+
+def train_pytorch_cv(
+    X: np.ndarray,
+    y: np.ndarray,
+    config: Dict[str, Any],
+    device: torch.device,
+    is_augmented: bool = False
+) -> None:
+    """
+    Train PyTorch model with K-fold cross-validation.
+    
+    Args:
+        X: Features
+        y: Labels
+        config: Configuration dictionary
+        device: Device to run training on
+        is_augmented: Whether using augmented data (for warning message)
+    """
+    if is_augmented:
+        print("Warning: Cross-validation with augmented data not fully supported.")
+        print("Using augmented training data for CV...")
+    
+    print("Starting K-fold cross validation...")
+    fold_results = perform_kfold_cv(X, y, config, device)
+    print_cv_summary(fold_results)
+
+
+def train_with_augmented_data(
+    config: Dict[str, Any],
+    device: torch.device,
+    model_type: str,
+    use_cv: bool,
+    resume_checkpoint: Optional[str] = None
+) -> bool:
+    """
+    Train model using augmented data.
+    
+    Args:
+        config: Configuration dictionary
+        device: Device to run training on
+        model_type: Type of model ('pytorch' or 'xgboost')
+        use_cv: Whether to use cross-validation
+        resume_checkpoint: Optional path to checkpoint to resume from
+        
+    Returns:
+        True if training was successful, False if augmented data not found
+    """
+    data_config = config['data']
+    
+    # Ensure train/test split exists (needed before augmentation)
+    train_path = 'data/processed/train.csv'
+    test_path = 'data/processed/test.csv'
+    create_train_test_split(
+        data_path=data_config['data_path'],
+        train_path=train_path,
+        test_path=test_path,
+        test_size=data_config['test_size'],
+        random_state=data_config['random_state'],
+        stratify=True
+    )
+    
+    data_result = load_augmented_data(data_config)
+    
+    if data_result is None:
+        return False
+    
+    X_train, y_train, X_val, y_val = data_result
+    X_train_processed, y_train_processed, X_val_processed, y_val_processed, _ = preprocess_train_val_data(
+        X_train, y_train, X_val, y_val
+    )
+    
+    if model_type == 'xgboost':
+        train_xgboost(
+            X_train_processed, y_train_processed,
+            X_val_processed, y_val_processed,
+            config, use_cv
+        )
+    elif use_cv:
+        train_pytorch_cv(
+            X_train_processed, y_train_processed,
+            config, device, is_augmented=True
+        )
+    else:
+        train_pytorch_standard(
+            X_train_processed, y_train_processed,
+            X_val_processed, y_val_processed,
+            config, device, resume_checkpoint
+        )
+    
+    return True
+
+
+def train_with_original_data(
+    config: Dict[str, Any],
+    device: torch.device,
+    model_type: str,
+    use_cv: bool,
+    resume_checkpoint: Optional[str] = None
+) -> None:
+    """
+    Train model using original (non-augmented) data.
+    
+    Args:
+        config: Configuration dictionary
+        device: Device to run training on
+        model_type: Type of model ('pytorch' or 'xgboost')
+        use_cv: Whether to use cross-validation
+        resume_checkpoint: Optional path to checkpoint to resume from
+    """
+    data_config = config['data']
+    
+    # Ensure train/test split exists
+    train_path = 'data/processed/train.csv'
+    test_path = 'data/processed/test.csv'
+    create_train_test_split(
+        data_path=data_config['data_path'],
+        train_path=train_path,
+        test_path=test_path,
+        test_size=data_config['test_size'],
+        random_state=data_config['random_state'],
+        stratify=True
+    )
+    
+    # Load training data
+    print("Loading training data...")
+    X, y = load_data(train_path)
+    print(f"Loaded {len(X)} samples with {X.shape[1]} features")
+    
+    print("Preprocessing data...")
+    X_processed, y_processed, _ = preprocess_data(
+        X, y,
+        fit_scaler=True,
+        scaler=None
+    )
+    
+    if model_type == 'xgboost':
+        # For XGBoost, split train into train/val (test is already separated)
+        X_train, X_val, y_train, y_val = split_data_for_xgboost(
+            X_processed, y_processed, data_config
+        )
+        train_xgboost(
+            X_train, y_train,
+            X_val, y_val,
+            config, use_cv
+        )
+    elif use_cv:
+        train_pytorch_cv(X_processed, y_processed, config, device)
+    else:
+        # For PyTorch standard training, split train into train/val (test is already separated)
+        X_train, X_val, y_train, y_val = split_data_for_pytorch(
+            X_processed, y_processed, data_config
+        )
+        train_pytorch_standard(
+            X_train, y_train,
+            X_val, y_val,
+            config, device, resume_checkpoint
+        )
+
+
+def finish_wandb() -> None:
+    """Finish wandb run and print summary."""
+    if not WANDB_AVAILABLE or wandb is None:
+        return
+    
+    wandb.finish()
+    if wandb.run:
+        print(f"View training results at: {wandb.run.url}")
+        print(f"Project dashboard: https://wandb.ai/{wandb.run.entity or 'YOUR_USERNAME'}/{wandb.run.project}")
+    else:
+        print("W&B run completed")
+
+
 def main():
+    """Main training entry point."""
     parser = argparse.ArgumentParser(description='Train network anomaly detection model')
     parser.add_argument(
         '--config',
@@ -83,29 +553,7 @@ def main():
     config = load_config(args.config)
     
     # Initialize wandb if enabled
-    wandb_config = config.get('logging', {})
-    use_wandb = wandb_config.get('use_wandb', False) and WANDB_AVAILABLE
-    
-    if use_wandb:
-        project = wandb_config.get('wandb_project', 'network-anomaly-detection')
-        entity = wandb_config.get('wandb_entity', None)
-        run_name = wandb_config.get('wandb_run_name')
-        if run_name is None:
-            from datetime import datetime
-            run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
-        wandb.init(
-            project=project,
-            entity=entity,
-            name=run_name,
-            config=config,
-            job_type="training",
-            sync_tensorboard=True  # Sync TensorBoard logs to wandb
-        )
-        # Patch TensorBoard to automatically sync logs (only if not already patched)
-        safe_patch_tensorboard(config['logging']['tensorboard_dir'])
-        print(f"Initialized W&B run: {run_name}")
-        print(f"TensorBoard logs will be synced to wandb")
+    initialize_wandb(config)
     
     # Get device
     device = get_device(
@@ -114,268 +562,29 @@ def main():
     )
     print(f"Using device: {device}")
     
-    # Load data
+    # Determine model type and data source
     data_config = config['data']
     use_augmented = data_config.get('use_augmented_data', False)
-    
-    # Determine model type early
     model_type = config['model'].get('type', 'pytorch').lower()
     
+    # Train model
     if use_augmented:
-        # Load augmented data
-        import os
-        aug_dir = data_config.get('augmented_data_dir', 'data/augmented')
-        train_path = data_config.get('train_data_path') or os.path.join(aug_dir, 'train_data_augmented.csv')
-        val_path = data_config.get('val_data_path') or os.path.join(aug_dir, 'val_data.csv')
-        
-        if os.path.exists(train_path) and os.path.exists(val_path):
-            print("Loading augmented data...")
-            X_train, y_train = load_data(train_path)
-            X_val, y_val = load_data(val_path)
-            print(f"Loaded augmented training data: {len(X_train)} samples")
-            print(f"Loaded validation data: {len(X_val)} samples")
-            
-            # Preprocess training data (fit scaler)
-            print("Preprocessing training data...")
-            X_train_processed, y_train_processed, scaler = preprocess_data(
-                X_train, y_train,
-                fit_scaler=True,
-                scaler=None
-            )
-            
-            # Preprocess validation data (use same scaler)
-            print("Preprocessing validation data...")
-            X_val_processed, y_val_processed, _ = preprocess_data(
-                X_val, y_val,
-                fit_scaler=False,
-                scaler=scaler
-            )
-            
-            if model_type == 'xgboost':
-                # XGBoost training with augmented data
-                if args.use_cv:
-                    print("XGBoost K-fold cross validation not yet implemented. Using standard train/val split.")
-                    args.use_cv = False
-                
-                print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}")
-                
-                # Train XGBoost model
-                checkpoint_dir = config['checkpoint']['save_dir']
-                model, metrics = train_xgboost_model(
-                    X_train_processed,
-                    y_train_processed,
-                    X_val_processed,
-                    y_val_processed,
-                    config,
-                    checkpoint_dir
-                )
-                
-                print("XGBoost training completed!")
-            elif args.use_cv:
-                # PyTorch K-fold CV with augmented data
-                print("Warning: Cross-validation with augmented data not fully supported.")
-                print("Using augmented training data for CV...")
-                # For CV, we'll use the augmented training data
-                fold_results = perform_kfold_cv(
-                    X_train_processed,
-                    y_train_processed,
-                    config,
-                    device
-                )
-                print_cv_summary(fold_results)
-            else:
-                # PyTorch standard training with augmented data
-                print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}")
-                
-                # Create datasets
-                train_dataset = NetworkAnomalyDataset(X_train_processed, y_train_processed)
-                val_dataset = NetworkAnomalyDataset(X_val_processed, y_val_processed)
-                
-                # Create data loaders
-                train_loader = create_dataloader(
-                    train_dataset,
-                    batch_size=config['training']['batch_size'],
-                    shuffle=True
-                )
-                val_loader = create_dataloader(
-                    val_dataset,
-                    batch_size=config['training']['batch_size'],
-                    shuffle=False
-                )
-                
-                # Create model
-                model_config = config['model'].copy()
-                model_config['input_dim'] = X_train_processed.shape[1]
-                model = create_model(model_config)
-                
-                # Create trainer
-                from datetime import datetime
-                run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                trainer = Trainer(
-                    model=model,
-                    train_loader=train_loader,
-                    val_loader=val_loader,
-                    config=config['training'],
-                    device=device,
-                    checkpoint_dir=config['checkpoint']['save_dir'],
-                    tensorboard_dir=config['logging']['tensorboard_dir'],
-                    run_name=run_name
-                )
-                
-                # Resume from checkpoint if specified
-                if args.resume:
-                    print(f"Resuming from checkpoint: {args.resume}")
-                    trainer.load_checkpoint(args.resume)
-                
-                # Train
-                print("Starting training...")
-                trainer.train(config['training']['num_epochs'])
-                
-                print("Training completed!")
-        else:
-            print(f"Warning: Augmented data not found at {train_path} or {val_path}")
-            print("Falling back to original data loading...")
-            use_augmented = False
-    
-    if not use_augmented:
-        # Original data loading
-        print("Loading data...")
-        X, y = load_data(data_config['data_path'])
-        print(f"Loaded {len(X)} samples with {X.shape[1]} features")
-        
-        # Preprocess data
-        print("Preprocessing data...")
-        X_processed, y_processed, scaler = preprocess_data(
-            X, y,
-            fit_scaler=True,
-            scaler=None
+        success = train_with_augmented_data(
+            config, device, model_type, args.use_cv, args.resume
         )
-        
-        if model_type == 'xgboost':
-            # XGBoost training
-            if args.use_cv:
-                print("XGBoost K-fold cross validation not yet implemented. Using standard train/val split.")
-                args.use_cv = False
-            
-            # Standard train/val/test split for XGBoost
-            print("Splitting data...")
-            X_train_processed, X_temp, y_train_processed, y_temp = train_test_split(
-                X_processed,
-                y_processed,
-                test_size=data_config['test_size'],
-                random_state=data_config['random_state']
+        if not success:
+            print("Falling back to original data loading...")
+            train_with_original_data(
+                config, device, model_type, args.use_cv, args.resume
             )
-            
-            val_size = data_config['val_size'] / (1 - data_config['test_size'])
-            X_val_processed, X_test, y_val_processed, y_test = train_test_split(
-                X_temp,
-                y_temp,
-                test_size=1 - val_size,
-                random_state=data_config['random_state']
-            )
-            
-            print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}, Test: {len(X_test)}")
-            
-            # Train XGBoost model
-            checkpoint_dir = config['checkpoint']['save_dir']
-            model, metrics = train_xgboost_model(
-                X_train_processed,
-                y_train_processed,
-                X_val_processed,
-                y_val_processed,
-                config,
-                checkpoint_dir
-            )
-            
-            print("XGBoost training completed!")
-            
-        else:
-            # PyTorch training
-            if args.use_cv:
-                # K-fold cross validation
-                print("Starting K-fold cross validation...")
-                fold_results = perform_kfold_cv(
-                    X_processed,
-                    y_processed,
-                    config,
-                    device
-                )
-                print_cv_summary(fold_results)
-            else:
-                # Standard train/val/test split
-                print("Splitting data...")
-                X_train_processed, X_temp, y_train_processed, y_temp = train_test_split(
-                    X_processed,
-                    y_processed,
-                    test_size=data_config['test_size'],
-                    random_state=data_config['random_state']
-                )
-                
-                val_size = data_config['val_size'] / (1 - data_config['test_size'])
-                X_val_processed, X_test, y_val_processed, y_test = train_test_split(
-                    X_temp,
-                    y_temp,
-                    test_size=1 - val_size,
-                    random_state=data_config['random_state']
-                )
-                
-                print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}, Test: {len(X_test)}")
-            
-            # Create datasets
-            train_dataset = NetworkAnomalyDataset(X_train_processed, y_train_processed)
-            val_dataset = NetworkAnomalyDataset(X_val_processed, y_val_processed)
-            
-            # Create data loaders
-            train_loader = create_dataloader(
-                train_dataset,
-                batch_size=config['training']['batch_size'],
-                shuffle=True
-            )
-            val_loader = create_dataloader(
-                val_dataset,
-                batch_size=config['training']['batch_size'],
-                shuffle=False
-            )
-            
-            # Create model
-            model_config = config['model'].copy()
-            model_config['input_dim'] = X_processed.shape[1]
-            model = create_model(model_config)
-            
-            # Create trainer
-            from datetime import datetime
-            run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            trainer = Trainer(
-                model=model,
-                train_loader=train_loader,
-                val_loader=val_loader,
-                config=config['training'],
-                device=device,
-                checkpoint_dir=config['checkpoint']['save_dir'],
-                tensorboard_dir=config['logging']['tensorboard_dir'],
-                run_name=run_name
-            )
-            
-            # Resume from checkpoint if specified
-            if args.resume:
-                print(f"Resuming from checkpoint: {args.resume}")
-                trainer.load_checkpoint(args.resume)
-            
-            # Train
-            print("Starting training...")
-            trainer.train(config['training']['num_epochs'])
-            
-            print("Training completed!")
-        
-        if use_wandb and WANDB_AVAILABLE:
-            wandb.finish()
-            if wandb.run:
-                print(f"View training results at: {wandb.run.url}")
-                print(f"Project dashboard: https://wandb.ai/{wandb.run.entity or 'YOUR_USERNAME'}/{wandb.run.project}")
-            else:
-                print("W&B run completed")
+    else:
+        train_with_original_data(
+            config, device, model_type, args.use_cv, args.resume
+        )
+    
+    # Finish wandb
+    finish_wandb()
 
 
 if __name__ == '__main__':
     main()
-

@@ -167,23 +167,21 @@ def resample_to_target_ratio(
 
 
 def augment_data(
-    data_path: str,
+    data_path: str = 'data/processed/train.csv',
     output_dir: str = "data/augmented",
-    test_size: float = 0.2,
     val_size: float = 0.1,
     noise_scale: float = 0.1,
     target_positive_ratio: float = 0.3,
     random_state: int = 42,
-    num_augmentations: int = 1
+    num_augmentations: int = 10
 ) -> None:
     """
     Main augmentation function.
     
     Args:
-        data_path: Path to raw data CSV
+        data_path: Path to training data CSV (default: data/processed/train.csv)
         output_dir: Directory to save augmented data
-        test_size: Fraction of data to hold out as test
-        val_size: Fraction of data to use as validation (after test split)
+        val_size: Fraction of training data to use as validation
         noise_scale: Standard deviation of noise as fraction of column std
         target_positive_ratio: Target ratio of positive samples
         random_state: Random seed
@@ -209,41 +207,24 @@ def augment_data(
     print(f"\nIdentified {len(numerical_cols)} numerical columns:")
     print(f"  {numerical_cols}")
     
-    # STEP 1: Hold out test data BEFORE augmentation
+    # Note: Test data is already separated in data/processed/test.csv
+    # We only augment the training data
+    
+    # STEP 1: Split train/val from training data
     print(f"\n{'='*60}")
-    print("Step 1: Holding out test data")
+    print("Step 1: Splitting train/validation data")
     print(f"{'='*60}")
-    X_train_val, X_test, y_train_val, y_test = train_test_split(
+    X_train, X_val, y_train, y_val = train_test_split(
         X, y,
-        test_size=test_size,
+        test_size=val_size,
         random_state=random_state,
         stratify=y
     )
-    print(f"Train+Val: {len(X_train_val)}, Test: {len(X_test)}")
-    
-    # Save test data (original, no augmentation)
-    os.makedirs(output_dir, exist_ok=True)
-    test_df = pd.concat([X_test, y_test], axis=1)
-    test_path = os.path.join(output_dir, "test_data.csv")
-    test_df.to_csv(test_path, index=False)
-    print(f"Saved test data to {test_path}")
-    
-    # STEP 2: Split train/val from train_val data
-    print(f"\n{'='*60}")
-    print("Step 2: Splitting train/validation data")
-    print(f"{'='*60}")
-    val_size_adjusted = val_size / (1 - test_size)
-    X_train, X_val, y_train, y_val = train_test_split(
-        X_train_val, y_train_val,
-        test_size=val_size_adjusted,
-        random_state=random_state,
-        stratify=y_train_val
-    )
     print(f"Train: {len(X_train)}, Val: {len(X_val)}")
     
-    # STEP 3: Augment training data
+    # STEP 2: Augment training data
     print(f"\n{'='*60}")
-    print("Step 3: Augmenting training data")
+    print("Step 2: Augmenting training data")
     print(f"{'='*60}")
     print(f"Noise scale: {noise_scale}")
     print(f"Target positive ratio: {target_positive_ratio}")
@@ -305,7 +286,7 @@ def augment_data(
     print(f"\nOutput files:")
     print(f"  - {train_path}")
     print(f"  - {val_path}")
-    print(f"  - {test_path}")
+    print(f"\nNote: Test data is in data/processed/test.csv (not augmented)")
 
 
 def main():
@@ -313,8 +294,8 @@ def main():
     parser.add_argument(
         '--data-path',
         type=str,
-        default='data/raw/embedded_system_network_security_dataset.csv',
-        help='Path to raw data CSV file'
+        default='data/processed/train.csv',
+        help='Path to training data CSV file (default: data/processed/train.csv)'
     )
     parser.add_argument(
         '--output-dir',
@@ -323,16 +304,10 @@ def main():
         help='Directory to save augmented data'
     )
     parser.add_argument(
-        '--test-size',
-        type=float,
-        default=0.2,
-        help='Fraction of data to hold out as test'
-    )
-    parser.add_argument(
         '--val-size',
         type=float,
         default=0.1,
-        help='Fraction of data to use as validation'
+        help='Fraction of training data to use as validation'
     )
     parser.add_argument(
         '--noise-scale',
@@ -364,7 +339,6 @@ def main():
     augment_data(
         data_path=args.data_path,
         output_dir=args.output_dir,
-        test_size=args.test_size,
         val_size=args.val_size,
         noise_scale=args.noise_scale,
         target_positive_ratio=args.target_positive_ratio,
