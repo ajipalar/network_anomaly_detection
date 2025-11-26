@@ -1,0 +1,62 @@
+# Model Configuration
+model:
+  name: "NetworkAnomalyDetector"
+  input_dim: 18  # Number of features (will be auto-detected)
+  hidden_dims: [128, 64, 32]
+  output_dim: 1
+  dropout: 0.3
+  activation: "relu"
+
+# Training Configuration
+training:
+  batch_size: 64
+  learning_rate: 0.001
+  num_epochs: 100
+  early_stopping_patience: 10
+  early_stopping_min_delta: 0.001
+  weight_decay: 0.0001
+  optimizer: "adam"
+  scheduler: "step"
+  scheduler_step_size: 30
+  scheduler_gamma: 0.1
+
+# Cross Validation Configuration
+cross_validation:
+  n_splits: 5
+  shuffle: true
+  random_state: 42
+  stratify: true
+
+# Data Configuration
+data:
+  data_path: "data/raw/embedded_system_network_security_dataset.csv"
+  test_size: 0.2
+  val_size: 0.1
+  random_state: 42
+  normalize: true
+
+# Checkpoint Configuration
+checkpoint:
+  save_dir: "checkpoints"
+  save_best: true
+  save_last: true
+  save_frequency: 10  # Save every N epochs
+  resume_from: null  # Path to checkpoint to resume from
+
+# Hugging Face Configuration
+huggingface:
+  repo_id: "your-username/network-anomaly-detector"
+  push_to_hub: false
+  private: false
+
+# Logging Configuration
+logging:
+  log_dir: "logs"
+  tensorboard_dir: "runs"
+  log_level: "INFO"
+
+# Device Configuration
+device:
+  use_cuda: true
+  cuda_device: 0
+
