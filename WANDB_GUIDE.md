@@ -26,6 +26,15 @@ logging:
 
 ## Features
 
+### TensorBoard Integration
+
+TensorBoard logs are **automatically synced** to your wandb dashboard:
+
+- All TensorBoard scalars, images, and histograms appear in wandb
+- View TensorBoard visualizations alongside wandb native metrics
+- Access both local TensorBoard (`tensorboard --logdir runs`) and cloud wandb dashboard
+- No additional configuration needed - works automatically when `use_wandb: true`
+
 ### Training Logging
 
 During training, the following metrics are automatically logged to wandb:
@@ -35,6 +44,7 @@ During training, the following metrics are automatically logged to wandb:
 - **Train/BatchLoss**: Batch-level training loss
 - **LearningRate**: Learning rate per epoch
 - **Best/ValidationLoss**: Best validation loss achieved
+- **TensorBoard logs**: All TensorBoard metrics synced automatically
 
 ### Testing Logging
 
@@ -116,14 +126,20 @@ python assess_model.py \
 
 1. **Web Interface**: 
    - Go to https://wandb.ai
-   - Navigate to your project
+   - Navigate to your project: `https://wandb.ai/ajikarunia-university-of-california/network-anomaly-detection`
    - View all runs, metrics, and visualizations
+   - **TensorBoard tab**: Access all TensorBoard logs synced from training
 
 2. **Command Line**:
    ```bash
    wandb status  # Check current status
-   wandb sync runs/  # Sync local runs
+   wandb sync runs/  # Manually sync local TensorBoard runs (if needed)
    ```
+
+3. **TensorBoard + wandb**:
+   - Local: `tensorboard --logdir runs` (for detailed local analysis)
+   - Cloud: wandb dashboard (for collaboration and sharing)
+   - Both are automatically kept in sync
 
 ## Dual Logging (TensorBoard + wandb)
 

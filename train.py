@@ -62,9 +62,13 @@ def main():
             entity=entity,
             name=run_name,
             config=config,
-            job_type="training"
+            job_type="training",
+            sync_tensorboard=True  # Sync TensorBoard logs to wandb
         )
+        # Patch TensorBoard to automatically sync logs
+        wandb.tensorboard.patch(root_logdir=config['logging']['tensorboard_dir'])
         print(f"Initialized W&B run: {run_name}")
+        print(f"TensorBoard logs will be synced to wandb")
     
     # Get device
     device = get_device(
@@ -164,7 +168,11 @@ def main():
         
         if use_wandb and WANDB_AVAILABLE:
             wandb.finish()
-            print(f"View training results at: {wandb.run.url if wandb.run else 'N/A'}")
+            if wandb.run:
+                print(f"View training results at: {wandb.run.url}")
+                print(f"Project dashboard: https://wandb.ai/{wandb.run.entity or 'YOUR_USERNAME'}/{wandb.run.project}")
+            else:
+                print("W&B run completed")
 
 
 if __name__ == '__main__':

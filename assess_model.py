@@ -390,9 +390,13 @@ def main():
             entity=entity,
             name=run_name,
             config=config,
-            job_type="assessment"
+            job_type="assessment",
+            sync_tensorboard=True  # Sync TensorBoard logs to wandb
         )
+        # Patch TensorBoard to automatically sync logs
+        wandb.tensorboard.patch(root_logdir=config['logging']['tensorboard_dir'])
         print(f"Initialized W&B run: {run_name}")
+        print(f"TensorBoard logs will be synced to wandb")
     
     # Load data
     print("Loading data...")
@@ -773,7 +777,11 @@ def main():
     
     if use_wandb:
         wandb.finish()
-        print(f"\nAssessment complete! View results at: {wandb.run.url}")
+        if wandb.run:
+            print(f"\nAssessment complete! View results at: {wandb.run.url}")
+            print(f"Project dashboard: https://wandb.ai/{wandb.run.entity or 'YOUR_USERNAME'}/{wandb.run.project}")
+        else:
+            print("\nAssessment complete!")
     else:
         print("\nAssessment complete! (W&B logging disabled)")
 

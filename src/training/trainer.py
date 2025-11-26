@@ -311,4 +311,7 @@ class Trainer:
         
         # Close TensorBoard writer
         self.writer.close()
+        
+        # TensorBoard logs are automatically synced to wandb via wandb.tensorboard.patch()
+        # called during wandb.init() in train.py/test.py/assess_model.py
 

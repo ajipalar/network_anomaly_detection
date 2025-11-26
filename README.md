@@ -79,6 +79,15 @@ The project includes comprehensive Weights & Biases (wandb) logging:
 - **Model assessment** with comprehensive reports (`assess_model.py`)
 - **Visualizations**: Class balance, confusion matrices, ROC curves, scatter plots
 - **Dual logging**: Both TensorBoard and wandb for maximum flexibility
+- **TensorBoard sync**: TensorBoard logs are automatically synced to wandb dashboard
+
+### Dashboard
+
+View live training metrics and model assessments:
+- **Project Dashboard**: [https://wandb.ai/ajikarunia-university-of-california/network-anomaly-detection](https://wandb.ai/ajikarunia-university-of-california/network-anomaly-detection)
+  *(Replace `YOUR_USERNAME` with your wandb username or team name from `config.yaml`)*
+
+All TensorBoard logs are automatically synced to the wandb dashboard, so you can view both native wandb metrics and TensorBoard visualizations in one place.
 
 ### Setup
 
