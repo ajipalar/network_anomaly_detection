@@ -9,17 +9,17 @@ model:
   activation: "relu"
   # XGBoost configuration (used when type is "xgboost")
   xgboost:
-    n_estimators: 100
+    n_estimators: 300
     max_depth: 6
-    learning_rate: 0.1
-    subsample: 1.0
-    colsample_bytree: 1.0
+    learning_rate: 0.05
+    subsample: 0.9 
+    colsample_bytree: 0.9 
     min_child_weight: 1
     gamma: 0
     reg_alpha: 0
     reg_lambda: 1
-    scale_pos_weight: 9.0  # For class imbalance (positive: 90%, negative: 10%)
-    random_state: 42
+    scale_pos_weight: None  # For class imbalance (positive: 90%, negative: 10%)
+    random_state: 43
 
 # Training Configuration
 training:
