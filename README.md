@@ -132,16 +132,24 @@ python test.py --config config.yaml --checkpoint checkpoints/best_model.pt
 
 ### Model Assessment
 
-Generate comprehensive model assessment report with W&B:
+**Single Model Assessment:**
 ```bash
 python assess_model.py --config config.yaml --checkpoint checkpoints/best_model.pt
 ```
 
-This generates:
-- Class balance histogram
-- Scatter plots (true vs predicted) for train/test/val sets
-- Comprehensive metrics comparison
-- All visualizations logged to Weights & Biases
+**Cross-Validation Fold Assessment (Auto-detects fold checkpoints):**
+```bash
+python assess_model.py --config config.yaml --use-folds
+```
+
+The assessment script automatically detects if fold checkpoints exist and assesses all folds. It generates:
+
+- **Class balance histogram**: Distribution of positive/negative classes
+- **Per-fold scatter plots**: True vs predicted labels for each fold
+- **Fold comparison plots**: Bar charts comparing metrics across folds
+- **Aggregated statistics**: Mean, std, min, max across all folds
+- **Comprehensive metrics**: Accuracy, Precision, Recall, F1, AUC for each fold
+- **All visualizations logged to Weights & Biases**
 
 ### Upload to Hugging Face
 

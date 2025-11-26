@@ -62,11 +62,19 @@ The assessment script generates a comprehensive report with:
    - True vs Predicted labels (with probability coloring)
    - True vs Prediction Probability
    - Separate plots for train/test/validation sets
+   - **Per-fold plots** when using cross-validation
 
 3. **Metrics Summary**
    - Comprehensive metrics table comparing all datasets
    - Confusion matrices for each dataset
    - All metrics logged as wandb scalars
+
+4. **Cross-Validation Assessment** (when using `--use-folds`)
+   - Automatically detects and assesses all fold models
+   - Per-fold metrics and visualizations
+   - Fold comparison bar charts
+   - Aggregated statistics (mean, std, min, max) across folds
+   - Comprehensive summary table with all folds
 
 ## Usage
 
@@ -82,9 +90,18 @@ python test.py --config config.yaml --checkpoint checkpoints/best_model.pt
 ```
 
 ### Model Assessment
+
+**Single Model:**
 ```bash
 python assess_model.py --config config.yaml --checkpoint checkpoints/best_model.pt
 ```
+
+**All CV Folds (Auto-detects):**
+```bash
+python assess_model.py --config config.yaml --use-folds
+```
+
+The script automatically detects fold checkpoints (`checkpoints/fold_*/best_model.pt`) and assesses all of them if found.
 
 ### Custom Project/Name
 ```bash
