@@ -163,7 +163,8 @@ def predict_on_data(model, data_loader, device):
             labels = labels.to(device)
             
             outputs = model(features)
-            probs = outputs.squeeze().cpu().numpy()
+            # Apply sigmoid to convert logits to probabilities
+            probs = torch.sigmoid(outputs).squeeze().cpu().numpy()
             preds = (probs > 0.5).astype(int)
             
             all_preds.extend(preds)

@@ -82,7 +82,7 @@ class Trainer:
         positive_weight = class_weights.get('positive', 0.9)
         negative_weight = class_weights.get('negative', 0.1)
         
-        # Calculate pos_weight for BCE loss
+        # Calculate pos_weight for BCEWithLogitsLoss
         # pos_weight scales the positive class contribution
         # To achieve 90% positive and 10% negative contribution:
         # pos_weight = (positive_weight / negative_weight) = 0.9 / 0.1 = 9
@@ -91,9 +91,10 @@ class Trainer:
         # Create pos_weight tensor and move to device
         pos_weight_tensor = torch.tensor(pos_weight, dtype=torch.float32).to(device)
         
-        self.criterion = nn.BCELoss(pos_weight=pos_weight_tensor)
+        # BCEWithLogitsLoss combines sigmoid + BCE loss for numerical stability
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight_tensor)
         
-        print(f"Using weighted BCE loss: positive_weight={positive_weight}, negative_weight={negative_weight}, pos_weight={pos_weight:.2f}")
+        print(f"Using weighted BCEWithLogitsLoss: positive_weight={positive_weight}, negative_weight={negative_weight}, pos_weight={pos_weight:.2f}")
         
         # Optimizer
         optimizer_name = config.get('optimizer', 'adam').lower()

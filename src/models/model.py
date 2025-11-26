@@ -50,9 +50,8 @@ class NetworkAnomalyDetector(nn.Module):
             layers.append(nn.Dropout(dropout))
             prev_dim = hidden_dim
         
-        # Output layer
+        # Output layer (no sigmoid - will use BCEWithLogitsLoss which includes sigmoid)
         layers.append(nn.Linear(prev_dim, output_dim))
-        layers.append(nn.Sigmoid())  # For binary classification
         
         self.model = nn.Sequential(*layers)
     
