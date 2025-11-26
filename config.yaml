@@ -54,6 +54,10 @@ logging:
   log_dir: "logs"
   tensorboard_dir: "runs"
   log_level: "INFO"
+  use_wandb: true
+  wandb_project: "network-anomaly-detection"
+  wandb_entity: null  # Your wandb username/team (optional)
+  wandb_run_name: null  # Auto-generated if null
 
 # Device Configuration
 device:

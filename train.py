@@ -12,6 +12,13 @@ from src.training import Trainer
 from src.utils import load_config, get_device
 from src.validation import perform_kfold_cv, print_cv_summary
 
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
+    wandb = None
+
 
 def main():
     parser = argparse.ArgumentParser(description='Train network anomaly detection model')
@@ -37,6 +44,27 @@ def main():
     
     # Load configuration
     config = load_config(args.config)
+    
+    # Initialize wandb if enabled
+    wandb_config = config.get('logging', {})
+    use_wandb = wandb_config.get('use_wandb', False) and WANDB_AVAILABLE
+    
+    if use_wandb:
+        project = wandb_config.get('wandb_project', 'network-anomaly-detection')
+        entity = wandb_config.get('wandb_entity', None)
+        run_name = wandb_config.get('wandb_run_name')
+        if run_name is None:
+            from datetime import datetime
+            run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        wandb.init(
+            project=project,
+            entity=entity,
+            name=run_name,
+            config=config,
+            job_type="training"
+        )
+        print(f"Initialized W&B run: {run_name}")
     
     # Get device
     device = get_device(
@@ -133,6 +161,10 @@ def main():
         trainer.train(config['training']['num_epochs'])
         
         print("Training completed!")
+        
+        if use_wandb and WANDB_AVAILABLE:
+            wandb.finish()
+            print(f"View training results at: {wandb.run.url if wandb.run else 'N/A'}")
 
 
 if __name__ == '__main__':

@@ -12,6 +12,11 @@ import numpy as np
 from tqdm import tqdm
 import os
 from datetime import datetime
+try:
+    import wandb
+    WANDB_AVAILABLE = True
+except ImportError:
+    WANDB_AVAILABLE = False
 
 
 class Trainer:
@@ -60,6 +65,16 @@ class Trainer:
         log_dir = os.path.join(tensorboard_dir, run_name)
         os.makedirs(log_dir, exist_ok=True)
         self.writer = SummaryWriter(log_dir=log_dir)
+        
+        # Initialize wandb if available and enabled
+        self.use_wandb = False
+        if WANDB_AVAILABLE:
+            # Check if wandb is already initialized (from external script)
+            if wandb.run is None:
+                # Will be initialized externally
+                self.use_wandb = False
+            else:
+                self.use_wandb = True
         
         # Loss function
         self.criterion = nn.BCELoss()
@@ -139,6 +154,10 @@ class Trainer:
             global_step = self.current_epoch * len(self.train_loader) + batch_idx
             self.writer.add_scalar('Train/BatchLoss', loss.item(), global_step)
             
+            # Log to wandb if available
+            if self.use_wandb and WANDB_AVAILABLE:
+                wandb.log({'Train/BatchLoss': loss.item()}, step=global_step)
+            
             pbar.set_postfix({'loss': loss.item()})
         
         avg_loss = total_loss / num_batches
@@ -210,6 +229,11 @@ class Trainer:
         for epoch, (train_loss, val_loss) in enumerate(zip(self.train_losses, self.val_losses)):
             self.writer.add_scalar('Loss/Train', train_loss, epoch + 1)
             self.writer.add_scalar('Loss/Validation', val_loss, epoch + 1)
+            if self.use_wandb and WANDB_AVAILABLE:
+                wandb.log({
+                    'Loss/Train': train_loss,
+                    'Loss/Validation': val_loss
+                }, step=epoch + 1)
     
     def train(self, num_epochs: int):
         """Train model for multiple epochs."""
@@ -238,6 +262,14 @@ class Trainer:
             current_lr = self.optimizer.param_groups[0]['lr']
             self.writer.add_scalar('LearningRate', current_lr, epoch + 1)
             
+            # Log to wandb if available
+            if self.use_wandb and WANDB_AVAILABLE:
+                wandb.log({
+                    'Loss/Train': train_loss,
+                    'Loss/Validation': val_loss,
+                    'LearningRate': current_lr
+                }, step=epoch + 1)
+            
             # Learning rate scheduling
             if self.scheduler is not None:
                 if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
@@ -252,6 +284,8 @@ class Trainer:
                 patience_counter = 0
                 # Log best validation loss
                 self.writer.add_scalar('Best/ValidationLoss', val_loss, epoch + 1)
+                if self.use_wandb and WANDB_AVAILABLE:
+                    wandb.log({'Best/ValidationLoss': val_loss}, step=epoch + 1)
             else:
                 patience_counter += 1
             

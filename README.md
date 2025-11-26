@@ -43,6 +43,7 @@ network_anomaly_detection/
 ├── requirements.txt           # Python dependencies
 ├── train.py                   # Main training script
 ├── test.py                    # Testing script
+├── assess_model.py           # Model assessment with W&B reporting
 ├── upload_to_hub.py          # Hugging Face upload script
 ├── colab_train.ipynb         # Google Colab notebook
 └── README.md                  # This file
@@ -70,6 +71,40 @@ Edit `config.yaml` to customize:
 - Checkpoint settings
 - Hugging Face repository details
 
+## Weights & Biases Integration
+
+The project includes comprehensive Weights & Biases (wandb) logging:
+
+- **Automatic logging** during training (loss, learning rate, metrics)
+- **Model assessment** with comprehensive reports (`assess_model.py`)
+- **Visualizations**: Class balance, confusion matrices, ROC curves, scatter plots
+- **Dual logging**: Both TensorBoard and wandb for maximum flexibility
+
+### Setup
+
+1. Install wandb: `pip install wandb`
+2. Login: `wandb login` (get your API key from https://wandb.ai)
+3. Configure in `config.yaml`:
+   ```yaml
+   logging:
+     use_wandb: true
+     wandb_project: "network-anomaly-detection"
+     wandb_entity: "your-username"  # Optional
+   ```
+
+### Model Assessment
+
+Generate comprehensive model assessment report:
+```bash
+python assess_model.py --config config.yaml --checkpoint checkpoints/best_model.pt
+```
+
+This creates:
+- Class balance histogram
+- Scatter plots (true vs predicted) for train/test/val
+- Comprehensive metrics table
+- All visualizations logged to wandb
+
 ## Usage
 
 ### Training
@@ -94,6 +129,19 @@ python train.py --config config.yaml --resume checkpoints/checkpoint_epoch_50.pt
 ```bash
 python test.py --config config.yaml --checkpoint checkpoints/best_model.pt
 ```
+
+### Model Assessment
+
+Generate comprehensive model assessment report with W&B:
+```bash
+python assess_model.py --config config.yaml --checkpoint checkpoints/best_model.pt
+```
+
+This generates:
+- Class balance histogram
+- Scatter plots (true vs predicted) for train/test/val sets
+- Comprehensive metrics comparison
+- All visualizations logged to Weights & Biases
 
 ### Upload to Hugging Face
 

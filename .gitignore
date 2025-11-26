@@ -61,3 +61,12 @@ Thumbs.db
 *.tmp
 *.log
 model_for_hub.pt
+
+# Assessment plots
+class_balance.png
+train_predictions.png
+test_predictions.png
+val_predictions.png
+
+# Weights & Biases
+wandb/
