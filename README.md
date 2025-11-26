@@ -43,6 +43,7 @@ network_anomaly_detection/
 ├── config.yaml                # Configuration file
 ├── requirements.txt           # Python dependencies
 ├── train.py                   # Main training script
+├── train_final_model.py      # Train final model from best CV fold
 ├── test.py                    # Testing script
 ├── assess_model.py           # Model assessment with W&B reporting
 ├── upload_to_hub.py          # Hugging Face upload script
@@ -153,6 +154,17 @@ python train.py --config config.yaml
 python train.py --config config.yaml --use-cv
 ```
 
+**Train final model (after k-fold CV):**
+```bash
+python train_final_model.py --config config.yaml
+```
+
+This script:
+- Finds the best model from k-fold CV (lowest validation loss)
+- Initializes a new model with those weights
+- Trains on full training data (train + val combined)
+- Saves to `checkpoints/final_model/best_model.pt`
+
 **Resume from checkpoint:**
 ```bash
 python train.py --config config.yaml --resume checkpoints/checkpoint_epoch_50.pt
@@ -160,9 +172,17 @@ python train.py --config config.yaml --resume checkpoints/checkpoint_epoch_50.pt
 
 ### Testing
 
+**Test a specific checkpoint:**
 ```bash
 python test.py --config config.yaml --checkpoint checkpoints/best_model.pt
 ```
+
+**Test the final model:**
+```bash
+python test.py --config config.yaml --final-model
+```
+
+This will automatically use `checkpoints/final_model/best_model.pt`.
 
 ### Model Assessment
 

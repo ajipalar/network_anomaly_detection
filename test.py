@@ -124,14 +124,19 @@ def main():
     parser.add_argument(
         '--checkpoint',
         type=str,
-        required=True,
-        help='Path to model checkpoint'
+        default=None,
+        help='Path to model checkpoint (required unless --final-model is used)'
     )
     parser.add_argument(
         '--test-data',
         type=str,
         default=None,
         help='Path to test data (if different from config)'
+    )
+    parser.add_argument(
+        '--final-model',
+        action='store_true',
+        help='Test the final model (checkpoints/final_model/best_model.pt) instead of specified checkpoint'
     )
     
     args = parser.parse_args()
@@ -235,15 +240,30 @@ def main():
         shuffle=False
     )
     
-    # Load model
-    print(f"Loading model from {args.checkpoint}...")
-    checkpoint = torch.load(args.checkpoint, map_location=device)
+    # Determine checkpoint path
+    if args.final_model:
+        # Use final model checkpoint
+        checkpoint_path = os.path.join(config['checkpoint']['save_dir'], 'final_model', 'best_model.pt')
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(
+                f"Final model not found at {checkpoint_path}. "
+                f"Please run train_final_model.py first or specify --checkpoint."
+            )
+        print(f"Testing final model from: {checkpoint_path}")
+    else:
+        if args.checkpoint is None:
+            raise ValueError("Must specify --checkpoint or use --final-model flag")
+        checkpoint_path = args.checkpoint
+        print(f"Loading model from {checkpoint_path}...")
+    
+    checkpoint = torch.load(checkpoint_path, map_location=device)
     
     model_config = config['model'].copy()
     model_config['input_dim'] = X_processed.shape[1]
     model = create_model(model_config)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
+    print(f"Model loaded successfully")
     
     # Initialize TensorBoard writer for test metrics
     tensorboard_dir = config['logging']['tensorboard_dir']
