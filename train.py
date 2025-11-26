@@ -118,6 +118,9 @@ def main():
     data_config = config['data']
     use_augmented = data_config.get('use_augmented_data', False)
     
+    # Determine model type early
+    model_type = config['model'].get('type', 'pytorch').lower()
+    
     if use_augmented:
         # Load augmented data
         import os
@@ -148,7 +151,28 @@ def main():
                 scaler=scaler
             )
             
-            if args.use_cv:
+            if model_type == 'xgboost':
+                # XGBoost training with augmented data
+                if args.use_cv:
+                    print("XGBoost K-fold cross validation not yet implemented. Using standard train/val split.")
+                    args.use_cv = False
+                
+                print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}")
+                
+                # Train XGBoost model
+                checkpoint_dir = config['checkpoint']['save_dir']
+                model, metrics = train_xgboost_model(
+                    X_train_processed,
+                    y_train_processed,
+                    X_val_processed,
+                    y_val_processed,
+                    config,
+                    checkpoint_dir
+                )
+                
+                print("XGBoost training completed!")
+            elif args.use_cv:
+                # PyTorch K-fold CV with augmented data
                 print("Warning: Cross-validation with augmented data not fully supported.")
                 print("Using augmented training data for CV...")
                 # For CV, we'll use the augmented training data
@@ -160,7 +184,54 @@ def main():
                 )
                 print_cv_summary(fold_results)
             else:
+                # PyTorch standard training with augmented data
                 print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}")
+                
+                # Create datasets
+                train_dataset = NetworkAnomalyDataset(X_train_processed, y_train_processed)
+                val_dataset = NetworkAnomalyDataset(X_val_processed, y_val_processed)
+                
+                # Create data loaders
+                train_loader = create_dataloader(
+                    train_dataset,
+                    batch_size=config['training']['batch_size'],
+                    shuffle=True
+                )
+                val_loader = create_dataloader(
+                    val_dataset,
+                    batch_size=config['training']['batch_size'],
+                    shuffle=False
+                )
+                
+                # Create model
+                model_config = config['model'].copy()
+                model_config['input_dim'] = X_train_processed.shape[1]
+                model = create_model(model_config)
+                
+                # Create trainer
+                from datetime import datetime
+                run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                trainer = Trainer(
+                    model=model,
+                    train_loader=train_loader,
+                    val_loader=val_loader,
+                    config=config['training'],
+                    device=device,
+                    checkpoint_dir=config['checkpoint']['save_dir'],
+                    tensorboard_dir=config['logging']['tensorboard_dir'],
+                    run_name=run_name
+                )
+                
+                # Resume from checkpoint if specified
+                if args.resume:
+                    print(f"Resuming from checkpoint: {args.resume}")
+                    trainer.load_checkpoint(args.resume)
+                
+                # Train
+                print("Starting training...")
+                trainer.train(config['training']['num_epochs'])
+                
+                print("Training completed!")
         else:
             print(f"Warning: Augmented data not found at {train_path} or {val_path}")
             print("Falling back to original data loading...")
@@ -179,9 +250,6 @@ def main():
             fit_scaler=True,
             scaler=None
         )
-        
-        # Determine model type
-        model_type = config['model'].get('type', 'pytorch').lower()
         
         if model_type == 'xgboost':
             # XGBoost training
