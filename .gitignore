@@ -39,6 +39,8 @@ ENV/
 # PyTorch
 *.pth
 *.pt
+# XGBoost
+*.pkl
 checkpoints/
 logs/
 runs/
@@ -68,6 +70,9 @@ class_balance.png
 train_predictions.png
 test_predictions.png
 val_predictions.png
+
+# Test results CSV
+test_results.csv
 
 # Weights & Biases
 wandb/

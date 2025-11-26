@@ -6,6 +6,7 @@ import argparse
 import torch
 import numpy as np
 import pandas as pd
+import csv
 from sklearn.metrics import (
     accuracy_score,
     precision_score,
@@ -20,7 +21,7 @@ from datetime import datetime
 import os
 
 from src.data import load_data, preprocess_data, NetworkAnomalyDataset, create_dataloader
-from src.models import create_model
+from src.models import create_model, load_xgboost_model
 from src.utils import load_config, get_device
 try:
     import wandb
@@ -67,8 +68,8 @@ def safe_patch_tensorboard(root_logdir: str):
         print(f"Warning: Could not patch TensorBoard: {e}")
 
 
-def evaluate_model(model, test_loader, device):
-    """Evaluate model on test set."""
+def evaluate_pytorch_model(model, test_loader, device):
+    """Evaluate PyTorch model on test set."""
     model.eval()
     all_preds = []
     all_labels = []
@@ -113,6 +114,33 @@ def evaluate_model(model, test_loader, device):
     }
 
 
+def evaluate_xgboost_model(model, X_test, y_test):
+    """Evaluate XGBoost model on test set."""
+    # Get predictions
+    y_pred = model.predict(X_test)
+    y_proba = model.predict_proba(X_test)[:, 1]
+    
+    # Calculate metrics
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, zero_division=0)
+    recall = recall_score(y_test, y_pred, zero_division=0)
+    f1 = f1_score(y_test, y_pred, zero_division=0)
+    auc = roc_auc_score(y_test, y_proba)
+    cm = confusion_matrix(y_test, y_pred)
+    
+    return {
+        'accuracy': accuracy,
+        'precision': precision,
+        'recall': recall,
+        'f1': f1,
+        'auc': auc,
+        'confusion_matrix': cm,
+        'predictions': y_pred,
+        'probabilities': y_proba,
+        'labels': y_test
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description='Test network anomaly detection model')
     parser.add_argument(
@@ -137,6 +165,18 @@ def main():
         '--final-model',
         action='store_true',
         help='Test the final model (checkpoints/final_model/best_model.pt) instead of specified checkpoint'
+    )
+    parser.add_argument(
+        '--model-name',
+        type=str,
+        default=None,
+        help='Name for this model (written to CSV). Default: auto-detect from checkpoint path'
+    )
+    parser.add_argument(
+        '--output-csv',
+        type=str,
+        default='test_results.csv',
+        help='Path to CSV file for storing test results (default: test_results.csv)'
     )
     
     args = parser.parse_args()
@@ -232,7 +272,7 @@ def main():
         scaler=scaler
     )
     
-    # Create test dataset
+    # Create test dataset and loader (for PyTorch) or keep arrays (for XGBoost)
     test_dataset = NetworkAnomalyDataset(X_processed, y_processed)
     test_loader = create_dataloader(
         test_dataset,
@@ -240,48 +280,110 @@ def main():
         shuffle=False
     )
     
-    # Determine checkpoint path
+    # Determine checkpoint path and model name
     if args.final_model:
-        # Use final model checkpoint
-        checkpoint_path = os.path.join(config['checkpoint']['save_dir'], 'final_model', 'best_model.pt')
-        if not os.path.exists(checkpoint_path):
+        # Use final model checkpoint - try both .pt and .pkl
+        checkpoint_dir = os.path.join(config['checkpoint']['save_dir'], 'final_model')
+        pt_path = os.path.join(checkpoint_dir, 'best_model.pt')
+        pkl_path = os.path.join(config['checkpoint']['save_dir'], 'best_xgboost_model.pkl')
+        
+        if os.path.exists(pt_path):
+            checkpoint_path = pt_path
+            model_type = 'pytorch'
+        elif os.path.exists(pkl_path):
+            checkpoint_path = pkl_path
+            model_type = 'xgboost'
+        else:
             raise FileNotFoundError(
-                f"Final model not found at {checkpoint_path}. "
+                f"Final model not found at {pt_path} or {pkl_path}. "
                 f"Please run train_final_model.py first or specify --checkpoint."
             )
         print(f"Testing final model from: {checkpoint_path}")
+        default_model_name = 'final_model'
     else:
         if args.checkpoint is None:
             raise ValueError("Must specify --checkpoint or use --final-model flag")
         checkpoint_path = args.checkpoint
         print(f"Loading model from {checkpoint_path}...")
+        
+        # Determine model type from file extension
+        if checkpoint_path.endswith('.pkl'):
+            model_type = 'xgboost'
+        else:
+            model_type = 'pytorch'
+        
+        # Try to extract fold number from path
+        default_model_name = None
+        if 'fold_' in checkpoint_path:
+            try:
+                # Extract fold number from path like "checkpoints/fold_1/best_model.pt"
+                parts = checkpoint_path.split('/')
+                for part in parts:
+                    if part.startswith('fold_'):
+                        fold_num = part.split('_')[1]
+                        default_model_name = f'fold_{fold_num}'
+                        break
+            except (IndexError, ValueError):
+                pass
+        
+        # If we couldn't extract fold number, use checkpoint filename
+        if default_model_name is None:
+            default_model_name = os.path.basename(checkpoint_path).replace('.pt', '').replace('.pkl', '')
     
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    # Use provided model name or default
+    model_name = args.model_name if args.model_name else default_model_name
+    print(f"Model name: {model_name}")
+    print(f"Model type: {model_type}")
     
-    model_config = config['model'].copy()
-    model_config['input_dim'] = X_processed.shape[1]
-    model = create_model(model_config)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(device)
-    print(f"Model loaded successfully")
+    # Load model based on type
+    if model_type == 'xgboost':
+        model, metadata = load_xgboost_model(checkpoint_path)
+        print(f"XGBoost model loaded successfully")
+        if metadata:
+            print(f"Model metadata: {metadata.get('model_name', 'N/A')}")
+        # For XGBoost, we don't need a DataLoader
+        test_loader = None
+    else:
+        checkpoint = torch.load(checkpoint_path, map_location=device)
+        model_config = config['model'].copy()
+        model_config['input_dim'] = X_processed.shape[1]
+        model = create_model(model_config)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.to(device)
+        print(f"PyTorch model loaded successfully")
+        
+        # Create test dataset and loader for PyTorch
+        test_dataset = NetworkAnomalyDataset(X_processed, y_processed)
+        test_loader = create_dataloader(
+            test_dataset,
+            batch_size=config['training']['batch_size'],
+            shuffle=False
+        )
     
-    # Initialize TensorBoard writer for test metrics
-    tensorboard_dir = config['logging']['tensorboard_dir']
-    run_name = f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    log_dir = os.path.join(tensorboard_dir, run_name)
-    os.makedirs(log_dir, exist_ok=True)
-    writer = SummaryWriter(log_dir=log_dir)
+    # Initialize TensorBoard writer for test metrics (PyTorch only)
+    writer = None
+    log_dir = None
+    if model_type == 'pytorch':
+        tensorboard_dir = config['logging']['tensorboard_dir']
+        run_name = f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        log_dir = os.path.join(tensorboard_dir, run_name)
+        os.makedirs(log_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=log_dir)
     
-    # Evaluate
+    # Evaluate based on model type
     print("Evaluating model...")
-    results = evaluate_model(model, test_loader, device)
+    if model_type == 'xgboost':
+        results = evaluate_xgboost_model(model, X_processed, y_processed)
+    else:
+        results = evaluate_pytorch_model(model, test_loader, device)
     
-    # Log metrics to TensorBoard
-    writer.add_scalar('Metrics/Accuracy', results['accuracy'], 0)
-    writer.add_scalar('Metrics/Precision', results['precision'], 0)
-    writer.add_scalar('Metrics/Recall', results['recall'], 0)
-    writer.add_scalar('Metrics/F1_Score', results['f1'], 0)
-    writer.add_scalar('Metrics/AUC', results['auc'], 0)
+    # Log metrics to TensorBoard (PyTorch only)
+    if writer is not None:
+        writer.add_scalar('Metrics/Accuracy', results['accuracy'], 0)
+        writer.add_scalar('Metrics/Precision', results['precision'], 0)
+        writer.add_scalar('Metrics/Recall', results['recall'], 0)
+        writer.add_scalar('Metrics/F1_Score', results['f1'], 0)
+        writer.add_scalar('Metrics/AUC', results['auc'], 0)
     
     # Log to wandb if available
     if use_wandb and WANDB_AVAILABLE:
@@ -293,67 +395,73 @@ def main():
             'Metrics/AUC': results['auc']
         })
     
-    # Log confusion matrix as image
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    plt.figure(figsize=(8, 6))
-    sns.heatmap(
-        results['confusion_matrix'],
-        annot=True,
-        fmt='d',
-        cmap='Blues',
-        xticklabels=['Normal', 'Anomaly'],
-        yticklabels=['Normal', 'Anomaly']
-    )
-    plt.title('Confusion Matrix')
-    plt.ylabel('True Label')
-    plt.xlabel('Predicted Label')
-    plt.tight_layout()
-    writer.add_figure('ConfusionMatrix', plt.gcf(), 0)
+    # Log visualizations (only for PyTorch with TensorBoard/wandb)
+    if writer is not None or (use_wandb and WANDB_AVAILABLE):
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        
+        # Log confusion matrix
+        plt.figure(figsize=(8, 6))
+        sns.heatmap(
+            results['confusion_matrix'],
+            annot=True,
+            fmt='d',
+            cmap='Blues',
+            xticklabels=['Normal', 'Anomaly'],
+            yticklabels=['Normal', 'Anomaly']
+        )
+        plt.title('Confusion Matrix')
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        if writer is not None:
+            writer.add_figure('ConfusionMatrix', plt.gcf(), 0)
+        
+        if use_wandb and WANDB_AVAILABLE:
+            wandb.log({"ConfusionMatrix": wandb.Image(plt.gcf())})
+        
+        plt.close()
+        
+        # Log ROC curve
+        from sklearn.metrics import roc_curve
+        fpr, tpr, _ = roc_curve(results['labels'], results['probabilities'])
+        plt.figure(figsize=(8, 6))
+        plt.plot(fpr, tpr, label=f'ROC Curve (AUC = {results["auc"]:.4f})')
+        plt.plot([0, 1], [0, 1], 'k--', label='Random')
+        plt.xlabel('False Positive Rate')
+        plt.ylabel('True Positive Rate')
+        plt.title('ROC Curve')
+        plt.legend()
+        plt.grid(True)
+        if writer is not None:
+            writer.add_figure('ROC_Curve', plt.gcf(), 0)
+        
+        if use_wandb and WANDB_AVAILABLE:
+            wandb.log({"ROC_Curve": wandb.Image(plt.gcf())})
+        
+        plt.close()
+        
+        # Log precision-recall curve
+        from sklearn.metrics import precision_recall_curve
+        precision, recall, _ = precision_recall_curve(results['labels'], results['probabilities'])
+        plt.figure(figsize=(8, 6))
+        plt.plot(recall, precision, label='Precision-Recall Curve')
+        plt.xlabel('Recall')
+        plt.ylabel('Precision')
+        plt.title('Precision-Recall Curve')
+        plt.legend()
+        plt.grid(True)
+        if writer is not None:
+            writer.add_figure('PrecisionRecall_Curve', plt.gcf(), 0)
+        
+        if use_wandb and WANDB_AVAILABLE:
+            wandb.log({"PrecisionRecall_Curve": wandb.Image(plt.gcf())})
+        
+        plt.close()
     
-    # Log to wandb if available
-    if use_wandb and WANDB_AVAILABLE:
-        wandb.log({"ConfusionMatrix": wandb.Image(plt.gcf())})
-    
-    plt.close()
-    
-    # Log ROC curve
-    from sklearn.metrics import roc_curve
-    fpr, tpr, _ = roc_curve(results['labels'], results['probabilities'])
-    plt.figure(figsize=(8, 6))
-    plt.plot(fpr, tpr, label=f'ROC Curve (AUC = {results["auc"]:.4f})')
-    plt.plot([0, 1], [0, 1], 'k--', label='Random')
-    plt.xlabel('False Positive Rate')
-    plt.ylabel('True Positive Rate')
-    plt.title('ROC Curve')
-    plt.legend()
-    plt.grid(True)
-    writer.add_figure('ROC_Curve', plt.gcf(), 0)
-    
-    if use_wandb and WANDB_AVAILABLE:
-        wandb.log({"ROC_Curve": wandb.Image(plt.gcf())})
-    
-    plt.close()
-    
-    # Log precision-recall curve
-    from sklearn.metrics import precision_recall_curve
-    precision, recall, _ = precision_recall_curve(results['labels'], results['probabilities'])
-    plt.figure(figsize=(8, 6))
-    plt.plot(recall, precision, label='Precision-Recall Curve')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title('Precision-Recall Curve')
-    plt.legend()
-    plt.grid(True)
-    writer.add_figure('PrecisionRecall_Curve', plt.gcf(), 0)
-    
-    if use_wandb and WANDB_AVAILABLE:
-        wandb.log({"PrecisionRecall_Curve": wandb.Image(plt.gcf())})
-    
-    plt.close()
-    
-    # Close writer
-    writer.close()
+    # Close writer if it exists (PyTorch only)
+    if writer is not None:
+        writer.close()
     
     # Print results
     print("\n" + "="*50)
@@ -364,7 +472,39 @@ def main():
     print(f"Recall:    {results['recall']:.4f}")
     print(f"F1 Score:  {results['f1']:.4f}")
     print(f"AUC:       {results['auc']:.4f}")
-    print(f"\nTensorBoard logs saved to: {log_dir}")
+    
+    # Write results to CSV
+    csv_path = args.output_csv
+    file_exists = os.path.exists(csv_path)
+    
+    # Prepare row data
+    row_data = {
+        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'model_name': model_name,
+        'checkpoint_path': checkpoint_path,
+        'accuracy': results['accuracy'],
+        'precision': results['precision'],
+        'recall': results['recall'],
+        'f1_score': results['f1'],
+        'auc': results['auc']
+    }
+    
+    # Write to CSV (append mode)
+    fieldnames = ['timestamp', 'model_name', 'checkpoint_path', 'accuracy', 'precision', 'recall', 'f1_score', 'auc']
+    
+    with open(csv_path, 'a', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+        
+        # Write header if file is new
+        if not file_exists:
+            writer.writeheader()
+        
+        # Write row
+        writer.writerow(row_data)
+    
+    print(f"\nResults saved to {csv_path}")
+    if log_dir is not None:
+        print(f"TensorBoard logs saved to: {log_dir}")
     print("\nConfusion Matrix:")
     print(results['confusion_matrix'])
     print("\nClassification Report:")

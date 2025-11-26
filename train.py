@@ -7,8 +7,8 @@ import torch
 from sklearn.model_selection import train_test_split
 
 from src.data import load_data, preprocess_data, NetworkAnomalyDataset, create_dataloader
-from src.models import create_model
-from src.training import Trainer
+from src.models import create_model, create_xgboost_model
+from src.training import Trainer, train_xgboost_model
 from src.utils import load_config, get_device
 from src.validation import perform_kfold_cv, print_cv_summary
 
@@ -180,18 +180,16 @@ def main():
             scaler=None
         )
         
-        if args.use_cv:
-            # K-fold cross validation
-            print("Starting K-fold cross validation...")
-            fold_results = perform_kfold_cv(
-                X_processed,
-                y_processed,
-                config,
-                device
-            )
-            print_cv_summary(fold_results)
-        else:
-            # Standard train/val/test split
+        # Determine model type
+        model_type = config['model'].get('type', 'pytorch').lower()
+        
+        if model_type == 'xgboost':
+            # XGBoost training
+            if args.use_cv:
+                print("XGBoost K-fold cross validation not yet implemented. Using standard train/val split.")
+                args.use_cv = False
+            
+            # Standard train/val/test split for XGBoost
             print("Splitting data...")
             X_train_processed, X_temp, y_train_processed, y_temp = train_test_split(
                 X_processed,
@@ -209,52 +207,97 @@ def main():
             )
             
             print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}, Test: {len(X_test)}")
-        
-        # Create datasets
-        train_dataset = NetworkAnomalyDataset(X_train_processed, y_train_processed)
-        val_dataset = NetworkAnomalyDataset(X_val_processed, y_val_processed)
-        
-        # Create data loaders
-        train_loader = create_dataloader(
-            train_dataset,
-            batch_size=config['training']['batch_size'],
-            shuffle=True
-        )
-        val_loader = create_dataloader(
-            val_dataset,
-            batch_size=config['training']['batch_size'],
-            shuffle=False
-        )
-        
-        # Create model
-        model_config = config['model'].copy()
-        model_config['input_dim'] = X_processed.shape[1]
-        model = create_model(model_config)
-        
-        # Create trainer
-        from datetime import datetime
-        run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        trainer = Trainer(
-            model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            config=config['training'],
-            device=device,
-            checkpoint_dir=config['checkpoint']['save_dir'],
-            tensorboard_dir=config['logging']['tensorboard_dir'],
-            run_name=run_name
-        )
-        
-        # Resume from checkpoint if specified
-        if args.resume:
-            print(f"Resuming from checkpoint: {args.resume}")
-            trainer.load_checkpoint(args.resume)
-        
-        # Train
-        print("Starting training...")
-        trainer.train(config['training']['num_epochs'])
-        
-        print("Training completed!")
+            
+            # Train XGBoost model
+            checkpoint_dir = config['checkpoint']['save_dir']
+            model, metrics = train_xgboost_model(
+                X_train_processed,
+                y_train_processed,
+                X_val_processed,
+                y_val_processed,
+                config,
+                checkpoint_dir
+            )
+            
+            print("XGBoost training completed!")
+            
+        else:
+            # PyTorch training
+            if args.use_cv:
+                # K-fold cross validation
+                print("Starting K-fold cross validation...")
+                fold_results = perform_kfold_cv(
+                    X_processed,
+                    y_processed,
+                    config,
+                    device
+                )
+                print_cv_summary(fold_results)
+            else:
+                # Standard train/val/test split
+                print("Splitting data...")
+                X_train_processed, X_temp, y_train_processed, y_temp = train_test_split(
+                    X_processed,
+                    y_processed,
+                    test_size=data_config['test_size'],
+                    random_state=data_config['random_state']
+                )
+                
+                val_size = data_config['val_size'] / (1 - data_config['test_size'])
+                X_val_processed, X_test, y_val_processed, y_test = train_test_split(
+                    X_temp,
+                    y_temp,
+                    test_size=1 - val_size,
+                    random_state=data_config['random_state']
+                )
+                
+                print(f"Train: {len(X_train_processed)}, Val: {len(X_val_processed)}, Test: {len(X_test)}")
+            
+            # Create datasets
+            train_dataset = NetworkAnomalyDataset(X_train_processed, y_train_processed)
+            val_dataset = NetworkAnomalyDataset(X_val_processed, y_val_processed)
+            
+            # Create data loaders
+            train_loader = create_dataloader(
+                train_dataset,
+                batch_size=config['training']['batch_size'],
+                shuffle=True
+            )
+            val_loader = create_dataloader(
+                val_dataset,
+                batch_size=config['training']['batch_size'],
+                shuffle=False
+            )
+            
+            # Create model
+            model_config = config['model'].copy()
+            model_config['input_dim'] = X_processed.shape[1]
+            model = create_model(model_config)
+            
+            # Create trainer
+            from datetime import datetime
+            run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            trainer = Trainer(
+                model=model,
+                train_loader=train_loader,
+                val_loader=val_loader,
+                config=config['training'],
+                device=device,
+                checkpoint_dir=config['checkpoint']['save_dir'],
+                tensorboard_dir=config['logging']['tensorboard_dir'],
+                run_name=run_name
+            )
+            
+            # Resume from checkpoint if specified
+            if args.resume:
+                print(f"Resuming from checkpoint: {args.resume}")
+                trainer.load_checkpoint(args.resume)
+            
+            # Train
+            print("Starting training...")
+            trainer.train(config['training']['num_epochs'])
+            
+            print("Training completed!")
         
         if use_wandb and WANDB_AVAILABLE:
             wandb.finish()

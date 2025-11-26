@@ -1,11 +1,25 @@
 # Model Configuration
 model:
+  type: "pytorch"  # Options: "pytorch" or "xgboost"
   name: "NetworkAnomalyDetector"
   input_dim: 18  # Number of features (will be auto-detected)
   hidden_dims: [128, 64, 32]
   output_dim: 1
   dropout: 0.3
   activation: "relu"
+  # XGBoost configuration (used when type is "xgboost")
+  xgboost:
+    n_estimators: 100
+    max_depth: 6
+    learning_rate: 0.1
+    subsample: 1.0
+    colsample_bytree: 1.0
+    min_child_weight: 1
+    gamma: 0
+    reg_alpha: 0
+    reg_lambda: 1
+    scale_pos_weight: 9.0  # For class imbalance (positive: 90%, negative: 10%)
+    random_state: 42
 
 # Training Configuration
 training:
