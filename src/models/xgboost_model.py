@@ -49,15 +49,27 @@ def save_xgboost_model(model: xgb.XGBClassifier, filepath: str, metadata: Option
         filepath: Path to save model
         metadata: Optional metadata to save alongside model
     """
-    os.makedirs(os.path.dirname(filepath) if os.path.dirname(filepath) else '.', exist_ok=True)
+    # Ensure directory exists
+    dir_path = os.path.dirname(filepath)
+    if dir_path:  # Only create directory if path has a directory component
+        os.makedirs(dir_path, exist_ok=True)
     
     # Save model
-    joblib.dump(model, filepath)
+    try:
+        joblib.dump(model, filepath)
+        print(f"XGBoost model saved successfully to: {filepath}")
+    except Exception as e:
+        print(f"Error saving XGBoost model to {filepath}: {e}")
+        raise
     
     # Save metadata if provided
     if metadata:
         metadata_path = filepath.replace('.pkl', '_metadata.pkl')
-        joblib.dump(metadata, metadata_path)
+        try:
+            joblib.dump(metadata, metadata_path)
+            print(f"Metadata saved to: {metadata_path}")
+        except Exception as e:
+            print(f"Warning: Could not save metadata to {metadata_path}: {e}")
 
 
 def load_xgboost_model(filepath: str) -> tuple:

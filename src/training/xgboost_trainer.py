@@ -36,11 +36,14 @@ def train_xgboost_model(
     Returns:
         Tuple of (trained_model, metrics_dict)
     """
+    # Ensure checkpoint directory exists
     os.makedirs(checkpoint_dir, exist_ok=True)
+    print(f"Checkpoint directory: {checkpoint_dir}")
     
     # Create model
     model_config = config['model'].copy()
     model = create_xgboost_model(model_config)
+    print(f"Created XGBoost model with config: {model_config.get('xgboost', {})}")
     
     # Train model
     print("Training XGBoost model...")
@@ -80,13 +83,28 @@ def train_xgboost_model(
         model_name = f"xgboost_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     best_model_path = os.path.join(checkpoint_dir, 'best_xgboost_model.pkl')
+    # Normalize path to handle any relative/absolute path issues
+    best_model_path = os.path.normpath(best_model_path)
+    
+    print(f"\nSaving model to: {best_model_path}")
     metadata = {
         'model_name': model_name,
         'metrics': metrics,
         'config': config
     }
-    save_xgboost_model(model, best_model_path, metadata)
-    print(f"\nModel saved to: {best_model_path}")
+    
+    try:
+        save_xgboost_model(model, best_model_path, metadata)
+        
+        # Verify file was created
+        if os.path.exists(best_model_path):
+            file_size = os.path.getsize(best_model_path)
+            print(f"✓ Model file verified: {file_size} bytes")
+        else:
+            raise FileNotFoundError(f"Model file was not created at {best_model_path}")
+    except Exception as e:
+        print(f"✗ Error saving model: {e}")
+        raise
     
     return model, metrics
 
