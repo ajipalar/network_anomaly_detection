@@ -11,13 +11,13 @@ model:
 training:
   batch_size: 64
   learning_rate: 0.001
-  num_epochs: 100
+  num_epochs: 200
   early_stopping_patience: 10
   early_stopping_min_delta: 0.001
   weight_decay: 0.0001
   optimizer: "adam"
   scheduler: "step"
-  scheduler_step_size: 30
+  scheduler_step_size: 60
   scheduler_gamma: 0.1
 
 # Cross Validation Configuration
