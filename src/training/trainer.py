@@ -6,10 +6,12 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from typing import Dict, Optional, Tuple
 import numpy as np
 from tqdm import tqdm
 import os
+from datetime import datetime
 
 
 class Trainer:
@@ -22,7 +24,9 @@ class Trainer:
         val_loader: DataLoader,
         config: Dict,
         device: torch.device,
-        checkpoint_dir: str
+        checkpoint_dir: str,
+        tensorboard_dir: Optional[str] = None,
+        run_name: Optional[str] = None
     ):
         """
         Initialize trainer.
@@ -34,6 +38,8 @@ class Trainer:
             config: Training configuration
             device: Device to train on
             checkpoint_dir: Directory to save checkpoints
+            tensorboard_dir: Directory for TensorBoard logs
+            run_name: Name for this training run (for TensorBoard)
         """
         self.model = model.to(device)
         self.train_loader = train_loader
@@ -41,6 +47,19 @@ class Trainer:
         self.config = config
         self.device = device
         self.checkpoint_dir = checkpoint_dir
+        
+        # Initialize TensorBoard writer
+        if tensorboard_dir is None:
+            tensorboard_dir = "runs"
+        
+        if run_name is None:
+            run_name = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        self.tensorboard_dir = tensorboard_dir
+        self.run_name = run_name
+        log_dir = os.path.join(tensorboard_dir, run_name)
+        os.makedirs(log_dir, exist_ok=True)
+        self.writer = SummaryWriter(log_dir=log_dir)
         
         # Loss function
         self.criterion = nn.BCELoss()
@@ -100,7 +119,7 @@ class Trainer:
         num_batches = 0
         
         pbar = tqdm(self.train_loader, desc=f"Epoch {self.current_epoch + 1}")
-        for features, labels in pbar:
+        for batch_idx, (features, labels) in enumerate(pbar):
             features = features.to(self.device)
             labels = labels.to(self.device).unsqueeze(1)
             
@@ -115,6 +134,10 @@ class Trainer:
             
             total_loss += loss.item()
             num_batches += 1
+            
+            # Log batch loss to TensorBoard
+            global_step = self.current_epoch * len(self.train_loader) + batch_idx
+            self.writer.add_scalar('Train/BatchLoss', loss.item(), global_step)
             
             pbar.set_postfix({'loss': loss.item()})
         
@@ -182,6 +205,11 @@ class Trainer:
         self.best_val_loss = checkpoint['best_val_loss']
         self.train_losses = checkpoint['train_losses']
         self.val_losses = checkpoint['val_losses']
+        
+        # Log previous losses to TensorBoard for continuity
+        for epoch, (train_loss, val_loss) in enumerate(zip(self.train_losses, self.val_losses)):
+            self.writer.add_scalar('Loss/Train', train_loss, epoch + 1)
+            self.writer.add_scalar('Loss/Validation', val_loss, epoch + 1)
     
     def train(self, num_epochs: int):
         """Train model for multiple epochs."""
@@ -202,6 +230,14 @@ class Trainer:
             val_loss = self.validate()
             self.val_losses.append(val_loss)
             
+            # Log metrics to TensorBoard
+            self.writer.add_scalar('Loss/Train', train_loss, epoch + 1)
+            self.writer.add_scalar('Loss/Validation', val_loss, epoch + 1)
+            
+            # Log learning rate
+            current_lr = self.optimizer.param_groups[0]['lr']
+            self.writer.add_scalar('LearningRate', current_lr, epoch + 1)
+            
             # Learning rate scheduling
             if self.scheduler is not None:
                 if isinstance(self.scheduler, optim.lr_scheduler.ReduceLROnPlateau):
@@ -214,6 +250,8 @@ class Trainer:
             if is_best:
                 self.best_val_loss = val_loss
                 patience_counter = 0
+                # Log best validation loss
+                self.writer.add_scalar('Best/ValidationLoss', val_loss, epoch + 1)
             else:
                 patience_counter += 1
             
@@ -230,10 +268,13 @@ class Trainer:
                 )
             
             print(f"Epoch {epoch + 1}/{num_epochs}")
-            print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+            print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}, LR: {current_lr:.6f}")
             
             # Early stopping
             if patience_counter >= early_stopping_patience:
                 print(f"Early stopping at epoch {epoch + 1}")
                 break
+        
+        # Close TensorBoard writer
+        self.writer.close()
 

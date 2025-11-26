@@ -14,6 +14,9 @@ from sklearn.metrics import (
     confusion_matrix,
     classification_report
 )
+from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
+import os
 
 from src.data import load_data, preprocess_data, NetworkAnomalyDataset, create_dataloader
 from src.models import create_model
@@ -125,9 +128,72 @@ def main():
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     
+    # Initialize TensorBoard writer for test metrics
+    tensorboard_dir = config['logging']['tensorboard_dir']
+    run_name = f"test_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    log_dir = os.path.join(tensorboard_dir, run_name)
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
+    
     # Evaluate
     print("Evaluating model...")
     results = evaluate_model(model, test_loader, device)
+    
+    # Log metrics to TensorBoard
+    writer.add_scalar('Metrics/Accuracy', results['accuracy'], 0)
+    writer.add_scalar('Metrics/Precision', results['precision'], 0)
+    writer.add_scalar('Metrics/Recall', results['recall'], 0)
+    writer.add_scalar('Metrics/F1_Score', results['f1'], 0)
+    writer.add_scalar('Metrics/AUC', results['auc'], 0)
+    
+    # Log confusion matrix as image
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(
+        results['confusion_matrix'],
+        annot=True,
+        fmt='d',
+        cmap='Blues',
+        xticklabels=['Normal', 'Anomaly'],
+        yticklabels=['Normal', 'Anomaly']
+    )
+    plt.title('Confusion Matrix')
+    plt.ylabel('True Label')
+    plt.xlabel('Predicted Label')
+    plt.tight_layout()
+    writer.add_figure('ConfusionMatrix', plt.gcf(), 0)
+    plt.close()
+    
+    # Log ROC curve
+    from sklearn.metrics import roc_curve
+    fpr, tpr, _ = roc_curve(results['labels'], results['probabilities'])
+    plt.figure(figsize=(8, 6))
+    plt.plot(fpr, tpr, label=f'ROC Curve (AUC = {results["auc"]:.4f})')
+    plt.plot([0, 1], [0, 1], 'k--', label='Random')
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title('ROC Curve')
+    plt.legend()
+    plt.grid(True)
+    writer.add_figure('ROC_Curve', plt.gcf(), 0)
+    plt.close()
+    
+    # Log precision-recall curve
+    from sklearn.metrics import precision_recall_curve
+    precision, recall, _ = precision_recall_curve(results['labels'], results['probabilities'])
+    plt.figure(figsize=(8, 6))
+    plt.plot(recall, precision, label='Precision-Recall Curve')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
+    plt.legend()
+    plt.grid(True)
+    writer.add_figure('PrecisionRecall_Curve', plt.gcf(), 0)
+    plt.close()
+    
+    # Close writer
+    writer.close()
     
     # Print results
     print("\n" + "="*50)
@@ -138,6 +204,7 @@ def main():
     print(f"Recall:    {results['recall']:.4f}")
     print(f"F1 Score:  {results['f1']:.4f}")
     print(f"AUC:       {results['auc']:.4f}")
+    print(f"\nTensorBoard logs saved to: {log_dir}")
     print("\nConfusion Matrix:")
     print(results['confusion_matrix'])
     print("\nClassification Report:")

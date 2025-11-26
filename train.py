@@ -110,13 +110,17 @@ def main():
         model = create_model(model_config)
         
         # Create trainer
+        from datetime import datetime
+        run_name = f"train_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         trainer = Trainer(
             model=model,
             train_loader=train_loader,
             val_loader=val_loader,
             config=config['training'],
             device=device,
-            checkpoint_dir=config['checkpoint']['save_dir']
+            checkpoint_dir=config['checkpoint']['save_dir'],
+            tensorboard_dir=config['logging']['tensorboard_dir'],
+            run_name=run_name
         )
         
         # Resume from checkpoint if specified

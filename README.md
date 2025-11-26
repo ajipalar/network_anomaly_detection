@@ -140,6 +140,42 @@ The testing script evaluates:
 - ROC AUC
 - Confusion Matrix
 
+## TensorBoard Logging
+
+The project includes comprehensive TensorBoard logging:
+
+### Training Metrics
+- **Train/BatchLoss**: Loss for each training batch
+- **Loss/Train**: Average training loss per epoch
+- **Loss/Validation**: Validation loss per epoch
+- **LearningRate**: Learning rate per epoch
+- **Best/ValidationLoss**: Best validation loss achieved
+
+### Testing Metrics
+- **Metrics/Accuracy**: Test accuracy
+- **Metrics/Precision**: Test precision
+- **Metrics/Recall**: Test recall
+- **Metrics/F1_Score**: Test F1 score
+- **Metrics/AUC**: Test ROC AUC
+- **ConfusionMatrix**: Confusion matrix visualization
+- **ROC_Curve**: ROC curve plot
+- **PrecisionRecall_Curve**: Precision-Recall curve plot
+
+### Viewing Logs
+
+**Local:**
+```bash
+tensorboard --logdir runs
+```
+
+**Google Colab:**
+```python
+%load_ext tensorboard
+%tensorboard --logdir runs
+```
+
+Then open the URL shown in the output (typically `http://localhost:6006`)
+
 ## License
 
 [Add your license here]

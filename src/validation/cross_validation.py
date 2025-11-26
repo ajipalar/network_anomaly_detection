@@ -7,6 +7,7 @@ from sklearn.model_selection import StratifiedKFold, KFold
 from typing import List, Tuple, Dict
 import torch
 from torch.utils.data import DataLoader
+from datetime import datetime
 
 from ..data import NetworkAnomalyDataset, preprocess_data, create_dataloader
 from ..models import create_model
@@ -88,13 +89,16 @@ def perform_kfold_cv(
         
         # Create trainer
         checkpoint_dir = f"{config['checkpoint']['save_dir']}/fold_{fold_idx + 1}"
+        run_name = f"cv_fold_{fold_idx + 1}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         trainer = Trainer(
             model=model,
             train_loader=train_loader,
             val_loader=val_loader,
             config=config['training'],
             device=device,
-            checkpoint_dir=checkpoint_dir
+            checkpoint_dir=checkpoint_dir,
+            tensorboard_dir=config['logging']['tensorboard_dir'],
+            run_name=run_name
         )
         
         # Train

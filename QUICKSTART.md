@@ -72,9 +72,26 @@
 - **Early Stopping**: Configure `early_stopping_patience` to prevent overfitting
 - **Device**: Set `use_cuda: false` to force CPU training
 
+## TensorBoard
+
+View training and testing metrics in TensorBoard:
+
+```bash
+# Start TensorBoard
+tensorboard --logdir runs
+
+# Open browser to http://localhost:6006
+```
+
+TensorBoard logs are automatically created during:
+- Training: Logs train/val loss, learning rate, and best metrics
+- Testing: Logs all evaluation metrics, confusion matrix, ROC curve, and PR curve
+- Cross-validation: Separate logs for each fold
+
 ## Troubleshooting
 
 - **CUDA out of memory**: Reduce `batch_size` in config
 - **Slow training**: Enable GPU in Colab (Runtime → Change runtime type → GPU)
 - **Import errors**: Ensure all dependencies are installed (`pip install -r requirements.txt`)
+- **TensorBoard not showing**: Check that `runs/` directory exists and contains log files
 
