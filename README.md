@@ -122,10 +122,12 @@ All TensorBoard logs are automatically synced to the wandb dashboard, so you can
 3. Configure in `config.yaml`:
    ```yaml
    logging:
-     use_wandb: true
+     use_wandb: true  # Set to true to enable
      wandb_project: "network-anomaly-detection"
      wandb_entity: "your-username"  # Optional
    ```
+
+**Note:** W&B logging is disabled by default. Set `use_wandb: true` in `config.yaml` to enable it.
 
 ### Model Assessment
 

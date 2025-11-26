@@ -64,7 +64,7 @@ logging:
   log_dir: "logs"
   tensorboard_dir: "runs"
   log_level: "INFO"
-  use_wandb: true
+  use_wandb: false  # Set to true to enable Weights & Biases logging
   wandb_project: "network-anomaly-detection"
   wandb_entity: null  # Your wandb username/team (optional)
   wandb_run_name: null  # Auto-generated if null
