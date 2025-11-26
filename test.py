@@ -26,6 +26,44 @@ try:
     WANDB_AVAILABLE = True
 except ImportError:
     WANDB_AVAILABLE = False
+    wandb = None
+
+# Track if TensorBoard has been patched (module-level flag)
+_tensorboard_patched = False
+
+def safe_patch_tensorboard(root_logdir: str):
+    """
+    Safely patch TensorBoard to sync with wandb, only if not already patched.
+    
+    Args:
+        root_logdir: Root directory for TensorBoard logs
+    """
+    global _tensorboard_patched
+    
+    # Early return if already patched or wandb not available
+    if _tensorboard_patched or not WANDB_AVAILABLE or wandb is None:
+        return
+    
+    # Only patch if wandb run is initialized
+    if wandb.run is None:
+        return
+    
+    try:
+        # Check if SummaryWriter has been patched by looking for wandb-specific attributes
+        from torch.utils.tensorboard import SummaryWriter
+        
+        # Check if already patched (either by us or another module)
+        if hasattr(SummaryWriter, '_wandb_patched'):
+            _tensorboard_patched = True
+            return
+        
+        # Patch TensorBoard
+        wandb.tensorboard.patch(root_logdir=root_logdir)
+        # Mark as patched to prevent duplicate patches
+        SummaryWriter._wandb_patched = True
+        _tensorboard_patched = True
+    except Exception as e:
+        print(f"Warning: Could not patch TensorBoard: {e}")
 
 
 def evaluate_model(model, test_loader, device):
@@ -118,8 +156,8 @@ def main():
             job_type="testing",
             sync_tensorboard=True  # Sync TensorBoard logs to wandb
         )
-        # Patch TensorBoard to automatically sync logs
-        wandb.tensorboard.patch(root_logdir=config['logging']['tensorboard_dir'])
+        # Patch TensorBoard to automatically sync logs (only if not already patched)
+        safe_patch_tensorboard(config['logging']['tensorboard_dir'])
         print(f"Initialized W&B run: {run_name}")
         print(f"TensorBoard logs will be synced to wandb")
     
